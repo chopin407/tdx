@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  tdx-httpserver:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: tdx-data-server
+    restart: unless-stopped
+    ports:
+      # 宿主机端口:容器内端口，修改为你的服务实际监听端口
+      - "8080:8080"
+    # 如果程序需要持久化缓存数据，挂载数据目录
+    volumes:
+      - ./data:/app/data
+    environment:
+      # 如果你的httpserver支持环境变量配置参数在这里添加
+      # - LISTEN=0.0.0.0:8080
+      # - DEBUG=true

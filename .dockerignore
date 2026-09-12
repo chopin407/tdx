@@ -1,0 +1,13 @@
+.git
+*.go
+go.mod
+go.sum
+example/
+docs/
+lib/
+protocol/
+tools/
+extend/
+data/
+*.md
+*.test
