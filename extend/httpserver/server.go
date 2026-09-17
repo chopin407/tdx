@@ -11,12 +11,18 @@ import (
 type Option func(*serverConfig)
 
 type serverConfig struct {
-	addr       string
-	hosts      []string
-	poolSize   int
-	exHqHosts  []string
-	exPoolSize int
-	options    []client.Option
+	addr         string
+	hosts        []string
+	poolSize     int
+	exHqHosts    []string
+	exPoolSize   int
+	options      []client.Option
+	codesOptions []tdx.CodesOption
+}
+
+// WithCodesOptions configures the existing security-metadata cache.
+func WithCodesOptions(opts ...tdx.CodesOption) Option {
+	return func(c *serverConfig) { c.codesOptions = append(c.codesOptions, opts...) }
 }
 
 // WithAddr 设置监听地址
@@ -82,7 +88,8 @@ func New(opts ...Option) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
-		tdx.DefaultCodes, err = tdx.NewCodesSqlite(tdx.WithCodesClient(codesClient))
+		codesOpts := append([]tdx.CodesOption{tdx.WithCodesClient(codesClient)}, cfg.codesOptions...)
+		tdx.DefaultCodes, err = tdx.NewCodesSqlite(codesOpts...)
 		if err != nil {
 			return nil, err
 		}
@@ -123,6 +130,9 @@ func Default(opts ...Option) (*Server, error) {
 func (s *Server) Run() error {
 	return s.server.ListenAndServe()
 }
+
+// Handler exposes the existing live routes for embedding in a larger service.
+func (s *Server) Handler() http.Handler { return s.server.Handler }
 
 // Close 关闭 HTTP 服务
 func (s *Server) Close() error {

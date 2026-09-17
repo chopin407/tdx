@@ -1,0 +1,8 @@
+.git
+output
+data
+*.exe
+*.test
+.env
+example
+docs/superpowers

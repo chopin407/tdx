@@ -51,6 +51,9 @@ func main() {
 | `WithExHqHosts(hosts...)` | 扩展行情服务器列表,为空则不启用扩展行情 | 无 |
 | `WithExPoolSize(n)` | 扩展连接池大小 | `1` |
 | `WithOptions(opts...)` | 通达信连接选项,如 `tdx.WithDebug()`、`tdx.WithRedial()` | 无 |
+| `WithCodesOptions(opts...)` | 证券元数据缓存配置，例如自定义缓存数据库路径 | 无 |
+
+`Server.Handler()` 可将原有行情路由嵌入其他 HTTP 服务。完整的 DuckDB 研究入口见 [研究服务](../../../docs/research.md)。
 
 > `Default()` 会自动添加 `tdx.WithRedial()` 断线重连选项。
 

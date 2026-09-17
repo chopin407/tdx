@@ -1,0 +1,18 @@
+services:
+  research:
+    build:
+      context: ..
+      dockerfile: deploy/research.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TDX_API_TOKEN: ${TDX_API_TOKEN:?set a token of at least 16 characters}
+      TZ: Asia/Shanghai
+    volumes:
+      - research-data:/app/output
+      - ${TDX_VIPDOC_DIR:?set an absolute Debian vipdoc directory}:/import:ro
+    command: ["-import-dir", "/import", "-schedule", "19:00"]
+    stop_grace_period: 2m
+volumes:
+  research-data:

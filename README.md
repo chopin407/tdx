@@ -1,5 +1,9 @@
 # 📈 通达信协议解析
 
+## 个人研究闭环（新增）
+
+新增 `cmd/tdx-research`：DuckDB 历史日线入库、在线增量更新、参数化策略、日线回测、选股和盘后复盘；与原有行情 HTTP 接口共用 8080。提供 Debian 原生/systemd 部署，详见 [研究服务使用说明](docs/research.md)。原有入口保持不变。
+
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org)  
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -323,4 +327,3 @@ _ = markets; _ = n; _ = insts; _ = q; _ = bars; _ = ticks
 MIT License - 详见 [LICENSE](LICENSE)
 
 ⭐ 喜欢这个项目吗？点个 Star 支持一下吧！  
-

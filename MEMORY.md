@@ -85,3 +85,13 @@
 - `minline/` 目录只有 `.lc1`(1分钟)；5分钟 `.lc5` 实际存放在 `fzline/` 目录。
 - **分钟线拉取/生成工具**：`example/FetchLC1ForTest/main.go` 实时拉取股票/指数 1分钟与5分钟K线，用 `WriteMinute` 生成 `.lc1/.lc5`，输出统一放 `./output/lc1/vipdoc/<sh|sz>/<minline|fzline>/`（供客户端导入测试，需手动复制到通达信 `vipdoc` 目录）。指数分钟线用 `GetIndexAll(TypeKlineMinute/5Minute)`，股票用 `GetKlineMinuteAll`/`GetKline5MinuteAll`。
 - zhb.zip 盘后包内含 46 个配置（tdxstat/tdxstat2/tdxbjmore/tdxhy/tdxzs/tdxbk/gbbq 等），GBK 文本，解析需 `UTF8ToGBK`。
+## 2026-09-17：DuckDB 个人研究闭环
+
+- 新入口 `cmd/tdx-research`，模块 `extend/research`。研究库由单个服务进程打开，后台导入/更新串行，HTTP 使用同一数据管理层；现有行情入口保留。新增 `httpserver.Handler()` / `WithCodesOptions()` 用于共用路由和自定义缓存路径。
+- DuckDB Go 驱动 `github.com/duckdb/duckdb-go/v2 v2.10503.0`，编译需要 CGO。Debian 原生/systemd 为主要部署方式，配置与完整调用顺序见 `docs/research.md`。原 Docker 配置未改，新 Dockerfile 有独立 ignore，避免原规则排除源码。
+- `.day` 导入按品种缩放：股票/指数 100，基金/B 股 1000，可显式覆盖；不修改旧 `extend.ReadDay`。股票量为股、指数量为手；保留 tdx2db 扩展成交量标记。异常原始行保存到 data_issues，有效行与异常记录同事务提交；存在异常时任务提示失败但保留有效数据。
+- 数据库主键 `(symbol,date)`，批量 upsert；每只证券向前重叠 14 自然日更新。行情和公司行为同时提交，重新离线导入撤销公司行为已检查标记。默认自动发现当前 A 股，旧历史保留；ETF/指数需显式更新。连续五只失败终止本轮；每日任务最多三次，间隔至少 30 分钟。
+- 策略 ma_trend / breakout 共用选股和回测信号；复权沿用 tdx 仿射因子并按信号日截断。回测为单股日线、次日开盘、费用/滑点/交易单位/涨跌限制显式配置，阻止零量/一字板成交。简化除权日分红与送股，配股/缩股拒绝模拟，非实盘交易系统。
+- 回测保存参数、SHA256 和完整输入快照；自动 daily 更新后保存包含各策略候选的复盘。研究 API 以 /v1 开头，新入口全部路由要求 Bearer token。
+- 验证：真实 DuckDB 集成测试、HTTP 闭环和 race 检查；本地四份原始文件重复导入得到 26,651 条有效记录，上证指数文件 16 条异常记录隔离。真实文件测试需设置 TDX_TEST_VIPDOC。Windows 验证使用 UCRT 工具链及同版本动态库（duckdb_use_lib）；默认 msvcrt 工具链存在 ABI 不匹配，不能把该问题误判为数据库逻辑错误。
+- 边界：尚未在 Debian 目标机部署验收；没有分钟回测、多资产组合、历史 ST/交易日历/完整历史股票池/历史板块成分和财务时点数据。在线可获取范围不等于全历史完整性。

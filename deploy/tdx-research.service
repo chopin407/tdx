@@ -1,0 +1,21 @@
+[Unit]
+Description=TDX daily research service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tdx
+Group=tdx
+WorkingDirectory=/opt/tdx
+EnvironmentFile=/etc/tdx-research.env
+Environment=TZ=Asia/Shanghai
+ExecStart=/opt/tdx/output/bin/tdx-research -addr :8080 -db /opt/tdx/output/research/market.duckdb -import-dir /srv/tdx/vipdoc -schedule 19:00
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
