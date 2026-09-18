@@ -142,7 +142,8 @@ func (s *Server) Close() error {
 // registerRoutes 注册所有路由
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// 健康检查
-	mux.HandleFunc("GET /", s.handleHealth)
+	mux.HandleFunc("GET /{$}", s.handleHealth)
+	s.registerAdditionalRoutes(mux)
 
 	// 代码/数量
 	mux.HandleFunc("GET /count", s.handleCount)
@@ -156,6 +157,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /quote", s.handleQuote)
 	mux.HandleFunc("GET /call_auction", s.handleCallAuction)
 	mux.HandleFunc("GET /gbbq", s.handleGbbq)
+	mux.HandleFunc("GET /gbbq/all", s.handleGbbqAll)
 	mux.HandleFunc("GET /finance", s.handleFinanceInfo)
 	mux.HandleFunc("GET /company/category", s.handleCompanyCategory)
 	mux.HandleFunc("GET /company/content", s.handleCompanyContent)
@@ -181,6 +183,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /kline/30minute/all", s.handleKline30MinuteAll)
 	mux.HandleFunc("GET /kline/60minute", s.handleKline60Minute)
 	mux.HandleFunc("GET /kline/60minute/all", s.handleKline60MinuteAll)
+	mux.HandleFunc("GET /kline/hour", s.handleKline60Minute)
+	mux.HandleFunc("GET /kline/hour/all", s.handleKline60MinuteAll)
 	mux.HandleFunc("GET /kline/day", s.handleKlineDay)
 	mux.HandleFunc("GET /kline/day/all", s.handleKlineDayAll)
 	mux.HandleFunc("GET /kline/week", s.handleKlineWeek)

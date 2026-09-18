@@ -718,6 +718,9 @@ func (s *Server) handleKline60MinuteAll(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleKlineDay(w http.ResponseWriter, r *http.Request) {
+	if s.dailyAdjustment(w, r, false) {
+		return
+	}
 	code, err := queryStr(r, "code")
 	if err != nil {
 		respondErr(w, http.StatusBadRequest, err.Error())
@@ -746,6 +749,9 @@ func (s *Server) handleKlineDay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleKlineDayAll(w http.ResponseWriter, r *http.Request) {
+	if s.dailyAdjustment(w, r, true) {
+		return
+	}
 	code, err := queryStr(r, "code")
 	if err != nil {
 		respondErr(w, http.StatusBadRequest, err.Error())

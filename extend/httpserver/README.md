@@ -264,3 +264,54 @@ curl "http://localhost:8080/ex/markets"
 # 获取扩展行情报价
 curl "http://localhost:8080/ex/quote?market=47&code=600519"
 ```
+
+## 前后复权日线与补齐接口
+
+新增日线接口复用 protocol 的仿射复权算法（现金分红包含加法偏移，不能只乘一个比例因子），不依赖 DuckDB 或本地股本缓存。
+
+| 路径 | 参数 | 含义 |
+| --- | --- | --- |
+| `/kline/day/qfq` | `code,start,count` | 前复权日线分页 |
+| `/kline/day/qfq/all` | `code` | 前复权全部可获取日线 |
+| `/kline/day/hfq` | `code,start,count` | 后复权日线分页 |
+| `/kline/day/hfq/all` | `code` | 后复权全部可获取日线 |
+| `/kline/day/factors` | `code` | 各日仿射复权因子 |
+| `/index/minute/all`、`/index/5minute/all`、`/index/15minute/all`、`/index/30minute/all`、`/index/60minute/all` | `code` | 补齐指数分钟全量路由 |
+| `/index/week`、`/index/month`、`/index/quarter`、`/index/year` | `code,start,count` | 补齐指数长周期分页路由 |
+
+原 `/kline/day` 和 `/kline/day/all` 同时支持 `adjust=none|qfq|hfq`，省略时保持原不复权行为。其他周期接口仍为不复权，不支持该参数。
+
+```bash
+curl "http://192.168.1.74:8080/kline/day/qfq?code=sz000001&start=0&count=100"
+curl "http://192.168.1.74:8080/kline/day/hfq/all?code=sh600519"
+curl "http://192.168.1.74:8080/kline/day/all?code=sh600519&adjust=qfq"
+curl "http://192.168.1.74:8080/kline/day/factors?code=sz000001"
+```
+
+如果使用 tdx-research 入口，以上请求也需要其 Bearer Token。
+
+- 分页 `start=0` 表示最新一段，`count` 为 1..800；返回 `data.Count` 和按时间升序的 `data.List`，越界返回空列表。
+- 先拉取服务器可提供的全部日线和股本变迁，再复权、分页，因此复权分页请求成本高于普通分页；批量研究应使用 DuckDB 研究服务。
+- 前复权锚定最新可获取交易日，后复权锚定最早可获取交易日，并非保证上市首日。上游可获取历史变化时，后复权基准也可能变化。
+- OHLC 和昨收沿用已有算法四舍五入到分，成交量、成交额不复权；不适合要求厘级精度的基金复权。价格 JSON 单位沿用原协议类型。
+- 因子字段 `QFQMul/QFQAdd`、`HFQMul/HFQAdd` 满足“复权元价 = Mul × 原始元价 + Add”。旧 `QFQ/HFQ` 比例字段不能完整表达现金分红。
+- 晚于最新日线的除权事件不参与计算；扩缩股（11/12 类）明确报错。该实时接口不提供历史时点快照，回测请使用研究服务。
+- 新复权接口参数错误 HTTP 400，上游/计算失败 HTTP 502；不会将失败伪装成不复权成功。未注册路径现在正确返回 404，健康检查仅匹配 `/`。
+
+## 功能表覆盖核对（2026-09-18）
+
+README 功能表中的行情、证券列表、分时/成交、K 线/指数、集合竞价、财务、F10、板块、行业、报表、统计、新股和扩展行情均已有对应 HTTP 数据接口。此次补齐：
+
+| 路径 | 参数 | 说明 |
+| --- | --- | --- |
+| `GET /gbbq/all` | 可选 `codes` | 不传时查询当前全市场股票的股本变迁，对应 `GetGbbqAll` 能力；传入时批量查询最多 100 个沪深北证券代码，自动去重 |
+| `GET /kline/hour` | `code,start,count` | `/kline/60minute` 别名，对应 `GetKlineHour` |
+| `GET /kline/hour/all` | `code` | `/kline/60minute/all` 别名，对应 `GetKlineHourAll` |
+
+```bash
+curl "http://192.168.1.74:8080/gbbq/all?codes=sz000001,sh600519"
+```
+
+`/gbbq/all` 返回 `data` 为证券代码到股本记录数组的映射，无记录时为 `[]`。非法批量参数返回 HTTP 400；任一上游请求失败返回 HTTP 502 和 `code=1`，不返回貌似完整的部分数据。全市场查询耗时较长，每只证券后释放连接池供其他请求使用；客户端取消后在下一次请求前停止（在途协议请求仍受底层超时控制）。推荐按代码分批调用。全市场范围采用当前股票列表，不包含已经退市且不在列表中的证券。
+
+覆盖边界：Go 的 `*Until` 回调方法、`GetKlineMinute241Until` 补点处理，以及依赖 `Workday` 的 `GetHistoryTradeFull/Before` 跨日遍历尚未直接映射 HTTP；逐日成交与通用周期接口已提供，复杂历史遍历应由研究任务编排。`DialExHq` 是连接配置，通过 `WithExHqHosts` 启用，而非 HTTP 数据路由。复权公开的是日线查询，`QFQ/HFQ` 对调用方自带数组的本地计算不另设上传接口。

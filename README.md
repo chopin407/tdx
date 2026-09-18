@@ -327,3 +327,7 @@ _ = markets; _ = n; _ = insts; _ = q; _ = bars; _ = ticks
 MIT License - 详见 [LICENSE](LICENSE)
 
 ⭐ 喜欢这个项目吗？点个 Star 支持一下吧！  
+
+HTTP 行情接口已补齐前后复权日线、复权因子和指数周期路由，示例与精度/锚点说明见 [HTTP 接口文档](extend/httpserver/README.md#前后复权日线与补齐接口)。
+
+HTTP 功能覆盖核对：补齐 `/gbbq/all`（全市场或指定代码批量股本变迁）及 `/kline/hour[/all]`；数据接口映射和未直接开放的 Go 回调/跨日遍历方法见 [HTTP 覆盖说明](extend/httpserver/README.md#功能表覆盖核对2026-09-18)。
