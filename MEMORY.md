@@ -104,3 +104,7 @@
 ### 2026-09-18 HTTP 功能表覆盖复核
 - 新增 `/gbbq/all`：默认当前股票全市场，codes 可选且最多100个；按证券借还连接、检查取消，错误不发布部分成功数据；返回证券到股本记录数组映射。
 - 新增 `/kline/hour` 和 `/kline/hour/all` 作为60分钟别名。扩展行情11个数据方法已有路由；回调型 Until、241分钟补点及 Workday 跨日遍历不直接暴露，边界已记录在接口文档。
+
+### 2026-09-18 沪深京日线数据完整包下载
+- 新增 `extend/down-tdx.go`：`GetTdxHsjDayPackage()` 获取最新信息(更新日期+文件大小+下载地址)，`DownloadTdxHsjDay(dir)` 下载 zip 到指定目录(建议 `./output/hsjday/`)。示例 `example/DownloadHsjDay`。
+- **数据来源关键**：vipdata.html 页面中 `<td id="hsjdayinfo">` 的更新日期是**动态加载**的——由 `https://data.tdx.com.cn/vipdoc/_hsjdayinfo.js` 填充（`window.HSJDAY_SOFT_TIME` / `HSJDAY_SOFT_SIZE`），HTML 源码本身只有空壳。下载地址 `https://data.tdx.com.cn/vipdoc/hsjday.zip` 固定写死在 HTML 的 `<a href>` 中。zip 内为 `vipdoc/<sh|sz|bj>/lday/*.day` 日线文件（格式见上文本地数据文件解析节）。
