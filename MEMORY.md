@@ -108,3 +108,5 @@
 ### 2026-09-18 沪深京日线数据完整包下载
 - 新增 `extend/down-tdx.go`：`GetTdxHsjDayPackage()` 获取最新信息(更新日期+文件大小+下载地址)，`DownloadTdxHsjDay(dir)` 下载 zip 到指定目录(建议 `./output/hsjday/`)。示例 `example/DownloadHsjDay`。
 - **数据来源关键**：vipdata.html 页面中 `<td id="hsjdayinfo">` 的更新日期是**动态加载**的——由 `https://data.tdx.com.cn/vipdoc/_hsjdayinfo.js` 填充（`window.HSJDAY_SOFT_TIME` / `HSJDAY_SOFT_SIZE`），HTML 源码本身只有空壳。下载地址 `https://data.tdx.com.cn/vipdoc/hsjday.zip` 固定写死在 HTML 的 `<a href>` 中。zip 内为 `vipdoc/<sh|sz|bj>/lday/*.day` 日线文件（格式见上文本地数据文件解析节）。
+- **增量校验**：`DownloadTdxHsjDay` 下载前读取本地 `hsjday.txt` 的更新日期，若与服务器一致且 `hsjday.zip` 存在则跳过下载直接返回本地路径；否则重新下载。下载采用**原子写入**（先写 `hsjday.zip.part`，完成后 `os.Rename` 为 `hsjday.zip`，失败清理 `.part`），避免半成品被误用（参考 Windows 下 zip 被截断踩坑）。
+- **解压**：`UnzipHsjDay(zipPath, dataDir)` 复用 `lib/zip.Decode` 解压到指定目录（如 `./data`）；`DownloadAndUnzipHsjDay(downloadDir, dataDir)` 一步完成下载+解压。
