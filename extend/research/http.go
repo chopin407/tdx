@@ -244,6 +244,104 @@ func (s *Service) Handler() http.Handler {
 		}
 		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
 	})
+	m.HandleFunc("POST /v1/mtfa/screens", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Date    string      `json:"date"`
+			Symbols []string    `json:"symbols"`
+			Config  *MTFAConfig `json:"config"`
+		}
+		if err := decode(w, r, &req); err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		cfg := mergeMTFAConfig(req.Config)
+		d, err := s.Store.SnapshotWindow(r.Context(), req.Symbols, req.Date, 260)
+		if err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		v, err := ScanMTFA(d, req.Date, cfg)
+		if err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		id := uuid.NewString()
+		if err = s.Store.Artifact(r.Context(), id, "mtfa-screen", v); err != nil {
+			reply(w, 500, nil, err)
+			return
+		}
+		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
+	})
+	m.HandleFunc("GET /v1/mtfa/latest", func(w http.ResponseWriter, r *http.Request) {
+		var raw string
+		err := s.Store.db.QueryRowContext(r.Context(), "SELECT body FROM artifacts WHERE kind IN ('mtfa-screen','daily-bundle') ORDER BY created_at DESC LIMIT 1").Scan(&raw)
+		if err != nil {
+			code := 500
+			if errors.Is(err, sql.ErrNoRows) {
+				code = 404
+			}
+			reply(w, code, nil, err)
+			return
+		}
+		reply(w, 200, json.RawMessage(raw), nil)
+	})
+	m.HandleFunc("POST /v1/mtfa/execution", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Plan  MTFAPlan       `json:"plan"`
+			Input ExecutionInput `json:"input"`
+		}
+		if err := decode(w, r, &req); err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		reply(w, 200, DecideExecution(req.Plan, req.Input), nil)
+	})
+	m.HandleFunc("POST /v1/mtfa/backtests", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Symbols []string         `json:"symbols"`
+			Config  *PortfolioConfig `json:"config"`
+		}
+		if err := decode(w, r, &req); err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		cfg := mergePortfolioConfig(req.Config)
+		d, err := s.Store.Snapshot(r.Context(), req.Symbols, cfg.End)
+		if err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		v, err := BacktestMTFAPortfolio(d, cfg)
+		if err != nil {
+			reply(w, 400, nil, err)
+			return
+		}
+		id := uuid.NewString()
+		if err = s.Store.Artifact(r.Context(), id, "mtfa-portfolio-backtest", v); err != nil {
+			reply(w, 500, nil, err)
+			return
+		}
+		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
+	})
+	m.HandleFunc("GET /v1/data-coverage", func(w http.ResponseWriter, r *http.Request) {
+		var bars, profiles, checked, issues int64
+		var first, last string
+		err := s.Store.db.QueryRowContext(r.Context(), "SELECT count(DISTINCT symbol),COALESCE(CAST(min(date) AS VARCHAR),''),COALESCE(CAST(max(date) AS VARCHAR),'') FROM bars_daily").Scan(&bars, &first, &last)
+		if err == nil {
+			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM instrument_profiles").Scan(&profiles)
+		}
+		if err == nil {
+			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM instruments WHERE actions_checked").Scan(&checked)
+		}
+		if err == nil {
+			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM data_issues").Scan(&issues)
+		}
+		if err != nil {
+			reply(w, 500, nil, err)
+			return
+		}
+		reply(w, 200, map[string]any{"symbols_with_bars": bars, "profiles": profiles, "actions_checked": checked, "data_issues": issues, "first_date": first, "last_date": last, "gaps": []string{"historical ST status", "historical industry membership", "historical float shares/market cap", "official exchange calendar", "historical intraday snapshots", "shareholder-count announcement history"}}, nil)
+	})
 	m.HandleFunc("POST /v1/backtests", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			StrategyID string         `json:"strategy_id"`

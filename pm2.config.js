@@ -1,23 +1,45 @@
+const path = require("path");
+
+const root = __dirname;
+
 module.exports = {
   apps: [
     {
       name: "tdx-httpserver",
       script: "./httpserver",
-      cwd: "/home/kjg/work/tdx",
+      cwd: root,
       instances: 1,
       exec_mode: "fork",
-      // 启动参数，没有就注释掉
-      // args: ["--host","0.0.0.0","--port","8080"],
       autorestart: true,
-      watch: false, // 代码更新不需要自动重启，关闭
+      watch: false,
       max_memory_restart: "500M",
-    //   env: {
-    //     // Go环境变量，把代理带上
-    //     GOPROXY: "https://goproxy.cn,direct"
-    //   },
-      log_date_format: "YYYY‑MM‑DD HH:mm:ss",
-      out_file: "./logs/out.log",
-      error_file: "./logs/err.log"
-    }
-  ]
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      out_file: path.join(root, "output/logs/httpserver.out.log"),
+      error_file: path.join(root, "output/logs/httpserver.err.log"),
+    },
+    {
+      name: "tdx-research",
+      script: "./output/bin/tdx-research",
+      cwd: root,
+      args: ["-addr", ":8081", "-db", "output/research/market.duckdb", "-schedule", "19:00"],
+      instances: 1,
+      exec_mode: "fork",
+      interpreter: "none",
+      autorestart: true,
+      restart_delay: 5000,
+      kill_timeout: 120000,
+      listen_timeout: 15000,
+      watch: false,
+      max_memory_restart: "1500M",
+      env: {
+        TZ: "Asia/Shanghai",
+        TDX_API_TOKEN: process.env.TDX_API_TOKEN,
+        TDX_VIPDOC_DIR: process.env.TDX_VIPDOC_DIR,
+      },
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      out_file: path.join(root, "output/logs/tdx-research.out.log"),
+      error_file: path.join(root, "output/logs/tdx-research.err.log"),
+      merge_logs: true,
+    },
+  ],
 };

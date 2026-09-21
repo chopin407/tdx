@@ -32,15 +32,21 @@ func main() {
 		os.Exit(1)
 	}
 }
+func defaultImportDir() string {
+	return strings.TrimSpace(os.Getenv("TDX_VIPDOC_DIR"))
+}
 func run() error {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	dbPath := flag.String("db", "output/research/market.duckdb", "local DuckDB file")
-	importDir := flag.String("import-dir", "", "server-side vipdoc directory")
+	importDir := flag.String("import-dir", defaultImportDir(), "server-side vipdoc directory")
 	scale := flag.Int("price-scale", 0, "offline price divisor: 0 by instrument, or explicit 100/1000")
 	schedule := flag.String("schedule", "19:00", "daily Shanghai HH:MM; empty disables scheduling")
 	symbolList := flag.String("symbols", "", "comma-separated update universe; empty discovers current A shares")
 	offline := flag.Bool("offline", false, "disable live APIs and online jobs")
 	flag.Parse()
+	if *importDir != "" && !filepath.IsAbs(*importDir) {
+		return fmt.Errorf("import directory must be an absolute path")
+	}
 	token := os.Getenv("TDX_API_TOKEN")
 	if len(token) < 16 {
 		return fmt.Errorf("set TDX_API_TOKEN to at least 16 characters")

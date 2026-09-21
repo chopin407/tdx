@@ -226,3 +226,50 @@ func TestDividendAccounting(t *testing.T) {
 		t.Fatal("ex-date caused artificial loss")
 	}
 }
+
+func TestExecutionStateMachine(t *testing.T) {
+	plan := MTFAPlan{TradeAllowed: true, Trigger: 10, Stop: 9.5, MaxBuy: 10.3}
+	base := ExecutionInput{Price: 10.1, MarketPermission: true, AccountPermission: true, MainlineValid: true, LiquidityNormal: true, SessionValid: true}
+	if got := DecideExecution(plan, base); got.State != "order-allowed" {
+		t.Fatal(got)
+	}
+	base.SessionValid = false
+	if got := DecideExecution(plan, base); got.State != "cancelled" {
+		t.Fatal(got)
+	}
+	base.SessionValid = true
+	base.Price = 10.31
+	if got := DecideExecution(plan, base); got.State != "no-chase-wait" {
+		t.Fatal(got)
+	}
+	base.Price = 10.1
+	base.HitStopBeforeEntry = true
+	if got := DecideExecution(plan, base); got.State != "cancelled" {
+		t.Fatal(got)
+	}
+}
+
+func TestMonthlyBackgroundNeverUsesCurrentCalendarMonth(t *testing.T) {
+	bars := fixtureBars(420)
+	months := completeMonths(bars)
+	if len(months) == 0 {
+		t.Fatal("expected completed months")
+	}
+	lastBar := bars[len(bars)-1]
+	if months[len(months)-1].Date[:7] == lastBar.Date[:7] {
+		t.Fatal("current calendar month leaked into completed monthly background")
+	}
+}
+
+func TestMTFAScanHardExcludesST(t *testing.T) {
+	d := fixtureDataset(150)
+	d.Profiles = map[string]InstrumentProfile{"sz000001": {Symbol: "sz000001", Name: "ST测试", Industry: "测试行业", IsST: true, FloatShares: 1e9}}
+	date := d.Bars["sz000001"][149].Date
+	r, err := ScanMTFA(d, date, DefaultMTFAConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Candidates) != 0 || r.Excluded["sz000001"] != "ST/delisting security" {
+		t.Fatal(r)
+	}
+}

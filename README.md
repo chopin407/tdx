@@ -2,7 +2,10 @@
 
 ## 个人研究闭环（新增）
 
-新增 `cmd/tdx-research`：DuckDB 历史日线入库、在线增量更新、参数化策略、日线回测、选股和盘后复盘；与原有行情 HTTP 接口共用 8080。提供 Debian 原生/systemd 部署，详见 [研究服务使用说明](docs/research.md)。原有入口保持不变。
+新增 `cmd/tdx-research`：DuckDB 历史日线入库、在线增量更新、MTF-A 周/月筛选、形态评分、次日执行状态机、组合回测和盘后复盘；与原有行情 HTTP 接口共用路由。离线目录通过 `TDX_VIPDOC_DIR` 或 `-import-dir` 配置，详见 [研究服务使用说明](docs/research.md)。原有入口保持不变。
+
+Debian 可使用 systemd，或通过 `deploy/tdx-research-pm2.sh` 管理 `pm2.config.js` 中独立的 `tdx-research` 进程；两种方式不要同时启用。
+首次初始化可按 `down → import → update → daily` 执行：`down` 下载并解压通达信官方沪深京完整日线包。
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org)  
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)

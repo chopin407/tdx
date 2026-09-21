@@ -25,6 +25,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS research_meta (id INTEGER PRIMARY KEY, schema_version INTEGER NOT NULL, revision BIGINT NOT NULL);
 INSERT INTO research_meta VALUES (1,1,0) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS instruments (symbol VARCHAR PRIMARY KEY, kind VARCHAR NOT NULL, actions_checked BOOLEAN NOT NULL DEFAULT false, updated_at VARCHAR NOT NULL);
+CREATE TABLE IF NOT EXISTS instrument_profiles (symbol VARCHAR PRIMARY KEY, name VARCHAR NOT NULL DEFAULT '', industry VARCHAR NOT NULL DEFAULT '', ipo_date VARCHAR NOT NULL DEFAULT '', is_st BOOLEAN NOT NULL DEFAULT false, float_shares DOUBLE NOT NULL DEFAULT 0, total_shares DOUBLE NOT NULL DEFAULT 0, finance_date VARCHAR NOT NULL DEFAULT '', source VARCHAR NOT NULL DEFAULT '', point_in_time BOOLEAN NOT NULL DEFAULT false, updated_at VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS bars_daily (symbol VARCHAR NOT NULL, date DATE NOT NULL, open BIGINT NOT NULL, high BIGINT NOT NULL, low BIGINT NOT NULL, close BIGINT NOT NULL, volume BIGINT NOT NULL, amount DOUBLE NOT NULL, source VARCHAR NOT NULL, PRIMARY KEY(symbol,date));
 CREATE TABLE IF NOT EXISTS corporate_actions (symbol VARCHAR NOT NULL, date DATE NOT NULL, category INTEGER NOT NULL, c1 DOUBLE, c2 DOUBLE, c3 DOUBLE, c4 DOUBLE, PRIMARY KEY(symbol,date,category));
 CREATE TABLE IF NOT EXISTS strategies (id VARCHAR PRIMARY KEY, body VARCHAR NOT NULL);
@@ -118,8 +119,10 @@ func (s *Store) UpsertWithIssues(ctx context.Context, symbol string, bars []Bar,
 	if err != nil {
 		return err
 	}
-	for start := 0; start < len(bars); start += 200 {
-		end := start + 200
+	// DuckDB handles wide prepared inserts efficiently. A 1000-row batch keeps
+	// parameter counts bounded while avoiding dozens of round trips per .day file.
+	for start := 0; start < len(bars); start += 1000 {
+		end := start + 1000
 		if end > len(bars) {
 			end = len(bars)
 		}
@@ -180,6 +183,18 @@ func (s *Store) Latest(ctx context.Context, symbol string) (string, error) {
 	return d, err
 }
 
+func (s *Store) UpsertProfile(ctx context.Context, p InstrumentProfile) error {
+	if !symbolRE.MatchString(p.Symbol) {
+		return fmt.Errorf("invalid profile symbol")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO instrument_profiles VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(symbol) DO UPDATE SET name=excluded.name,industry=excluded.industry,ipo_date=excluded.ipo_date,is_st=excluded.is_st,float_shares=excluded.float_shares,total_shares=excluded.total_shares,finance_date=excluded.finance_date,source=excluded.source,point_in_time=excluded.point_in_time,updated_at=excluded.updated_at`,
+		p.Symbol, p.Name, p.Industry, p.IPODate, p.IsST, p.FloatShares, p.TotalShares, p.FinanceDate, p.Source, p.PointInTime, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
 // Snapshot loads one consistent revision. Empty symbols means the local universe.
 func (s *Store) Snapshot(ctx context.Context, symbols []string, end string) (*Dataset, error) {
 	return s.SnapshotWindow(ctx, symbols, end, 0)
@@ -193,7 +208,7 @@ func (s *Store) SnapshotWindow(ctx context.Context, symbols []string, end string
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	d := &Dataset{Bars: map[string][]Bar{}, Actions: map[string][]*protocol.Gbbq{}, ActionsChecked: map[string]bool{}}
+	d := &Dataset{Bars: map[string][]Bar{}, Actions: map[string][]*protocol.Gbbq{}, ActionsChecked: map[string]bool{}, Profiles: map[string]InstrumentProfile{}}
 	if err := s.db.QueryRowContext(ctx, "SELECT revision FROM research_meta WHERE id=1").Scan(&d.Version); err != nil {
 		return nil, err
 	}
@@ -271,7 +286,24 @@ func (s *Store) SnapshotWindow(ctx context.Context, symbols []string, end string
 			d.ActionsChecked[symbol] = checked
 		}
 	}
-	return d, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	profileRows, err := s.db.QueryContext(ctx, "SELECT symbol,name,industry,ipo_date,is_st,float_shares,total_shares,finance_date,source,point_in_time FROM instrument_profiles")
+	if err != nil {
+		return nil, err
+	}
+	defer profileRows.Close()
+	for profileRows.Next() {
+		var p InstrumentProfile
+		if err = profileRows.Scan(&p.Symbol, &p.Name, &p.Industry, &p.IPODate, &p.IsST, &p.FloatShares, &p.TotalShares, &p.FinanceDate, &p.Source, &p.PointInTime); err != nil {
+			return nil, err
+		}
+		if _, ok := d.Bars[p.Symbol]; ok {
+			d.Profiles[p.Symbol] = p
+		}
+	}
+	return d, profileRows.Err()
 }
 
 func (s *Store) SaveStrategy(ctx context.Context, v Strategy) error {

@@ -1,5 +1,29 @@
 # 个人研究闭环（DuckDB，日线 v1）
 
+## 方案 A：MTF-A 多周期筛选与次日执行
+
+当前实现把《交易体系与复盘框架总手册》的 MTF-A v1.0 固化为同一套可复现规则：月线以最近完整日历月的收盘、6月/12月均线输出上升/横盘/下降背景标签（不参与 v1.0 硬过滤），只用已完成周线判断 `SMA10W/SMA20W` 趋势，日线要求站上且保持上升的 `SMA20`，识别 3–8 日缩量整理、突破前一日高点及收盘位置；结构低点减 `0.3×ATR14` 为止损，历史局部压力为目标，通过 `Pmax=(T+2S-3c)/3` 限定最高买价，并强制止损距离不超过 5%、计划盈亏比不低于 2。
+
+硬过滤默认排除名称含 ST/退及证券档案中的 ST 标记，并要求 20 日平均成交额不低于 5 亿元、当前流通市值不低于 50 亿元、至少 60 根日线。阈值可通过 `MTFAConfig` 调整。形态评分与可交易资格分开：评分高但主线、覆盖率、风险收益或硬门槛不合格的标的仍不得进入执行状态机。
+
+次日执行状态固定为 `monitoring → order-allowed / no-chase-wait / cancelled`。计划只在下一交易日有效；市场/账户/主线许可失败、重大风险、入场前先触及结构止损会取消；价格超过 Pmax 或流动性异常只等待、不追。此接口只输出研究建议，不连接券商、不自动下单。
+
+组合回测按信号日收盘生成计划、下一交易日日线保守撮合，默认 100 万本金、单笔风险 0.25%、最多 3 仓、单行业最多 2 仓、单仓不超过 30%，包含佣金、最低佣金、印花税和滑点；止损至少 T+1，收盘跌破前复权 MA10 后下一交易日退出。返回收益、最大回撤、胜率和平均 R。
+
+离线目录不写死在程序中，通过环境变量 `TDX_VIPDOC_DIR` 配置，也可用命令行 `-import-dir` 显式覆盖；两者都必须是服务器上的绝对路径。Debian 建议使用 `/srv/tdx/vipdoc`。服务与原行情并行时可让研究服务使用 `:8081`：
+
+```powershell
+$env:TDX_API_TOKEN='替换为至少16位的随机令牌'
+$env:TDX_VIPDOC_DIR='D:\new_tdx\vipdoc'
+.\output\bin\tdx-research.exe -addr :8081 -db output\research\market.duckdb -schedule 19:00
+```
+
+首次依次执行 `import → update → daily`。`import` 只导入原始日线；`update` 补齐公司行为、当前名称/行业/流通股本并恢复复权可用状态；`daily` 在线更新后生成复盘与 MTF-A 计划。离线包本身不含这些档案字段，不能跳过在线补齐。
+
+新增接口：`POST /v1/mtfa/screens`、`GET /v1/mtfa/latest`、`POST /v1/mtfa/execution`、`POST /v1/mtfa/backtests`、`GET /v1/data-coverage`。所有接口仍要求 Bearer token。
+
+明确缺口：历史 ST 状态、历史行业成员、历史流通股本和完整财务公告时点快照当前不可得；因此跨历史区间组合回测会返回 `research_only=true`，使用当前证券档案并在 `data_gaps` 中标明，不能宣称无幸存者偏差。只有日线 OHLC 时也无法还原触发价与止损价同日发生的真实先后顺序，这类样本会保守阻断。节假日缩短周暂按最后交易日不是周五而视为未完成周线，后续接入正式交易日历再修正。
+
 `cmd/tdx-research` 是新增的统一服务入口：离线历史入库 → 在线增量更新 → 策略信号 → 历史回测 → 选股和盘后复盘。原来的 `tools/httpserver.go` 入口仍可使用，但没有研究数据库功能。两个入口不要同时占用 8080。
 
 第一版所有策略计算都在 Go 的 `extend/research` 中，共用同一信号实现，避免为了部署再维护 Python 服务。Python 可以消费 JSON 数据集和结果。没有自动下单功能。
@@ -16,13 +40,14 @@ sudo apt-get install -y build-essential ca-certificates
 cd /opt/tdx                         # 换成实际项目路径
 mkdir -p output/bin output/research
 CGO_ENABLED=1 go build -trimpath -o output/bin/tdx-research ./cmd/tdx-research
+go build -trimpath -o output/bin/tdx-down ./cmd/tdx-down
 
 # 生成后保存到自己的部署环境文件，不要提交到 Git。
 export TDX_API_TOKEN="$(openssl rand -hex 24)"
+export TDX_VIPDOC_DIR=/srv/tdx/vipdoc
 ./output/bin/tdx-research \
   -addr :8080 \
   -db output/research/market.duckdb \
-  -import-dir /srv/tdx/vipdoc \
   -schedule 19:00
 ```
 
@@ -42,9 +67,9 @@ Authorization: Bearer <TDX_API_TOKEN>
 
 ## systemd 常驻
 
-提供了 `deploy/tdx-research.service` 模板。先把其中项目路径、用户、导入目录改成自己的路径；创建 `/etc/tdx-research.env`，仅放 `TDX_API_TOKEN=...`，限制文件权限。确保运行用户能读取导入目录、写入 `output/`。服务内部已含调度，无需再增加 crontab 或另起进程写同一个数据库。
+提供了 `deploy/tdx-research.service` 模板。先按服务器情况调整项目路径和运行用户；创建 `/etc/tdx-research.env`，配置 `TDX_API_TOKEN` 与 `TDX_VIPDOC_DIR` 并限制文件权限。确保运行用户能读取数据目录、写入 `output/`。服务内部已含调度，无需再增加 crontab 或另起进程写同一个数据库。
 
-模板使用 `tdx` 用户/组，需预先创建，或改成服务器已有的普通服务用户。若自行创建，可用 `sudo useradd --system --home /opt/tdx --shell /usr/sbin/nologin tdx`；只把 `output/` 的写权限交给该用户，源目录保留只读权限。
+模板使用 `tdx` 用户/组，需预先创建，或改成服务器已有的普通服务用户。若自行创建，可用 `sudo useradd --system --home /opt/tdx --shell /usr/sbin/nologin tdx`；只把 `output/` 的写权限交给该用户，源目录保留只读权限。复制 `deploy/tdx-research.env.example` 到 `/etc/tdx-research.env`，在其中设置 `TDX_API_TOKEN` 和服务器实际的 `TDX_VIPDOC_DIR`；systemd 的 `ExecStart` 不再写死数据目录。
 
 ```bash
 sudo cp deploy/tdx-research.service /etc/systemd/system/
@@ -53,7 +78,30 @@ sudo systemctl enable --now tdx-research
 journalctl -u tdx-research -f
 ```
 
-示例会占用 8080；切换前停止原有监听 8080 的行情服务。
+## PM2 管理（Debian 可选）
+
+不要同时用 systemd 和 PM2 启动同一个研究服务。`pm2.config.js` 已增加独立的 `tdx-research` 应用，默认监听 8081，数据库位于 `output/research/market.duckdb`，日志写入 `output/logs/`。管理脚本会先加载 `/etc/tdx-research.env` 并校验令牌、绝对数据路径和可执行文件：
+
+```bash
+cd /opt/tdx
+chmod +x deploy/tdx-research-pm2.sh
+./deploy/tdx-research-pm2.sh start
+./deploy/tdx-research-pm2.sh status
+./deploy/tdx-research-pm2.sh logs 200
+
+# 首次数据流程
+./deploy/tdx-research-pm2.sh down
+./deploy/tdx-research-pm2.sh import
+./deploy/tdx-research-pm2.sh jobs
+./deploy/tdx-research-pm2.sh update
+./deploy/tdx-research-pm2.sh daily
+```
+
+`down` 使用通达信官方完整日线包下载器，压缩包缓存在 `output/hsjday`，并解压到 `TDX_VIPDOC_DIR`。由于官方压缩包固定包含 `vipdoc/` 根目录，配置路径必须以 `/vipdoc` 结尾。不要在 `import` 正在读取目录时执行 `down`。
+
+修改 `/etc/tdx-research.env` 后使用 `restart` 或 `reload`，脚本会带 `--update-env`。执行 `pm2 startup` 和脚本的 `start` 后，`pm2 save` 会保存进程清单。若环境文件不在 `/etc`，可设置 `TDX_RESEARCH_ENV_FILE=/path/to/file`；API 地址可通过 `TDX_RESEARCH_BASE_URL` 覆盖。
+
+上面的 systemd 示例会占用 8080；若原行情服务也使用 8080，请修改其中一个端口。PM2 配置已将研究服务放在 8081。
 
 ## 完整 API 操作顺序
 

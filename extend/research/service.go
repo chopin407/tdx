@@ -162,8 +162,12 @@ func (s *Service) run(j Job, symbols []string) {
 					var review ReviewResult
 					review, err = Review(d, date, strategies)
 					if err == nil {
-						j.ArtifactID = uuid.NewString()
-						err = s.Store.Artifact(s.ctx, j.ArtifactID, "review", review)
+						var mtfa MTFAScanResult
+						mtfa, err = ScanMTFA(d, date, DefaultMTFAConfig())
+						if err == nil {
+							j.ArtifactID = uuid.NewString()
+							err = s.Store.Artifact(s.ctx, j.ArtifactID, "daily-bundle", map[string]any{"review": review, "mtfa": mtfa})
+						}
 					}
 				}
 			}

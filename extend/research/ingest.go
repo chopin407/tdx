@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/injoyai/ios"
@@ -106,8 +107,17 @@ type Source interface {
 	Actions(context.Context, string) ([]*protocol.Gbbq, error)
 }
 
+type ProfileSource interface {
+	Profile(context.Context, string) (InstrumentProfile, error)
+}
+
 // TDXSource uses an exclusively owned tdx connection; no HTTP loopback is used.
-type TDXSource struct{ Client *tdx.Client }
+type TDXSource struct {
+	Client     *tdx.Client
+	mu         sync.Mutex
+	names      map[string]string
+	industries map[string]string
+}
 
 // DialSource bounds host discovery and closes the owned client on cancellation.
 func DialSource(ctx context.Context) (Source, func(), error) {
@@ -136,16 +146,51 @@ func DialSource(ctx context.Context) (Source, func(), error) {
 	}
 	c.SetTimeout(10 * time.Second)
 	stop := context.AfterFunc(ctx, func() { c.Close() })
-	return TDXSource{Client: c}, func() { stop(); c.Close() }, nil
+	return &TDXSource{Client: c, names: map[string]string{}, industries: map[string]string{}}, func() { stop(); c.Close() }, nil
 }
 
-func (s TDXSource) Symbols(ctx context.Context) ([]string, error) {
+func (s *TDXSource) Symbols(ctx context.Context) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return s.Client.GetStockCodeAll()
+	symbols, err := s.Client.GetStockCodeAll()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ex := range []protocol.Exchange{protocol.ExchangeSZ, protocol.ExchangeSH, protocol.ExchangeBJ} {
+		resp, e := s.Client.GetCodeAll(ex)
+		if e != nil {
+			continue
+		}
+		prefix := "sz"
+		if ex == protocol.ExchangeSH {
+			prefix = "sh"
+		} else if ex == protocol.ExchangeBJ {
+			prefix = "bj"
+		}
+		for _, item := range resp.List {
+			s.names[prefix+item.Code] = strings.TrimSpace(item.Name)
+		}
+	}
+	if rows, e := s.Client.GetTdxHy(); e == nil {
+		for _, item := range rows {
+			prefix := "sz"
+			if item.Market == 1 {
+				prefix = "sh"
+			} else if item.Market == 2 {
+				prefix = "bj"
+			}
+			s.industries[prefix+item.Code] = item.SwHy
+			if s.industries[prefix+item.Code] == "" {
+				s.industries[prefix+item.Code] = item.TdxHy
+			}
+		}
+	}
+	return symbols, nil
 }
-func (s TDXSource) Actions(ctx context.Context, symbol string) ([]*protocol.Gbbq, error) {
+func (s *TDXSource) Actions(ctx context.Context, symbol string) ([]*protocol.Gbbq, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -159,7 +204,7 @@ func (s TDXSource) Actions(ctx context.Context, symbol string) ([]*protocol.Gbbq
 	out := append([]*protocol.Gbbq{}, r.List...)
 	return out, nil
 }
-func (s TDXSource) Daily(ctx context.Context, symbol, since string) ([]Bar, error) {
+func (s *TDXSource) Daily(ctx context.Context, symbol, since string) ([]Bar, error) {
 	result := []Bar{}
 	seen := map[string]bool{}
 	// An int cursor avoids the existing uint16 pagination wraparound.
@@ -208,6 +253,40 @@ func (s TDXSource) Daily(ctx context.Context, symbol, since string) ([]Bar, erro
 		}
 	}
 	return nil, fmt.Errorf("daily history exceeds protocol pagination limit")
+}
+
+func (s *TDXSource) Profile(ctx context.Context, symbol string) (InstrumentProfile, error) {
+	if err := ctx.Err(); err != nil {
+		return InstrumentProfile{}, err
+	}
+	s.mu.Lock()
+	emptyReference := len(s.names) == 0 && len(s.industries) == 0
+	s.mu.Unlock()
+	if emptyReference {
+		_, _ = s.Symbols(ctx)
+	}
+	ex := protocol.ExchangeSZ
+	if strings.HasPrefix(symbol, "sh") {
+		ex = protocol.ExchangeSH
+	} else if strings.HasPrefix(symbol, "bj") {
+		ex = protocol.ExchangeBJ
+	}
+	fi, err := s.Client.GetFinanceInfo(ex, symbol[2:])
+	if err != nil {
+		return InstrumentProfile{}, err
+	}
+	s.mu.Lock()
+	name := s.names[symbol]
+	industry := s.industries[symbol]
+	s.mu.Unlock()
+	upper := strings.ToUpper(strings.TrimSpace(name))
+	return InstrumentProfile{
+		Symbol: symbol, Name: name, Industry: industry,
+		IPODate:     fmt.Sprintf("%08d", fi.IPODate),
+		IsST:        strings.Contains(upper, "ST") || strings.Contains(name, "退"),
+		FloatShares: fi.LiuTongGuBen, TotalShares: fi.ZongGuBen,
+		FinanceDate: fmt.Sprintf("%08d", fi.UpdatedDate), Source: "tdx-finance-current", PointInTime: false,
+	}, nil
 }
 
 // ImportDirectory imports each file atomically; failures are retained in the job.
@@ -344,6 +423,15 @@ func (s *Store) Update(ctx context.Context, source Source, symbols []string, cut
 				return err
 			}
 			count = len(kept)
+			if ps, ok := source.(ProfileSource); ok && kind(symbol) == "stock" {
+				profile, profileErr := ps.Profile(ctx, symbol)
+				if profileErr != nil {
+					return fmt.Errorf("bars committed but instrument profile unavailable: %w", profileErr)
+				}
+				if err = s.UpsertProfile(ctx, profile); err != nil {
+					return fmt.Errorf("bars committed but instrument profile persist failed: %w", err)
+				}
+			}
 			return nil
 		}()
 		if err != nil {

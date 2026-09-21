@@ -110,3 +110,11 @@
 - **数据来源关键**：vipdata.html 页面中 `<td id="hsjdayinfo">` 的更新日期是**动态加载**的——由 `https://data.tdx.com.cn/vipdoc/_hsjdayinfo.js` 填充（`window.HSJDAY_SOFT_TIME` / `HSJDAY_SOFT_SIZE`），HTML 源码本身只有空壳。下载地址 `https://data.tdx.com.cn/vipdoc/hsjday.zip` 固定写死在 HTML 的 `<a href>` 中。zip 内为 `vipdoc/<sh|sz|bj>/lday/*.day` 日线文件（格式见上文本地数据文件解析节）。
 - **增量校验**：`DownloadTdxHsjDay` 下载前读取本地 `hsjday.txt` 的更新日期，若与服务器一致且 `hsjday.zip` 存在则跳过下载直接返回本地路径；否则重新下载。下载采用**原子写入**（先写 `hsjday.zip.part`，完成后 `os.Rename` 为 `hsjday.zip`，失败清理 `.part`），避免半成品被误用（参考 Windows 下 zip 被截断踩坑）。
 - **解压**：`UnzipHsjDay(zipPath, dataDir)` 复用 `lib/zip.Decode` 解压到指定目录（如 `./data`）；`DownloadAndUnzipHsjDay(downloadDir, dataDir)` 一步完成下载+解压。
+
+### 2026-09-21 MTF-A 方案 A 与看板接入
+- `extend/research` 新增 MTF-A 多周期策略、月线背景标签（不作v1.0硬过滤）、100分形态评分、行业主线代理评分、次日执行状态机和多标的组合回测；默认硬过滤 ST/退市、20日均成交额低于5亿元、当前流通市值低于50亿元。组合约束默认单笔风险0.25%、最多3仓、单行业最多2仓，按前复权 MA10 退出并返回胜率/平均R。
+- `instrument_profiles` 保存当前名称、行业、上市日、ST标记和流通/总股本。在线 update 获取档案；离线 `.day` 不含这些字段。历史 ST、行业成员、流通股本尚无时点表，历史组合结果必须标为 `research_only` 并返回 data_gaps，不能宣称无幸存者偏差。
+- `cmd/tdx-research` 不再内置任何机器的数据路径；离线目录只通过 `TDX_VIPDOC_DIR` 或优先级更高的 `-import-dir` 配置，且必须是绝对路径。Debian systemd 从 `/etc/tdx-research.env` 读取；服务与原行情并行时建议研究端口 8081。
+- 新增 `/v1/mtfa/screens`、`/v1/mtfa/latest`、`/v1/mtfa/execution`、`/v1/mtfa/backtests`、`/v1/data-coverage`；每日任务保存 review+mtfa 的 daily-bundle。`G:\financial\a-stock-dashboard` 通过服务端代理调用这些接口，令牌不下发浏览器。
+- Debian PM2 管理由 `pm2.config.js` 中的 `tdx-research` 应用和 `deploy/tdx-research-pm2.sh` 提供；默认研究端口8081，只从 `/etc/tdx-research.env`（或 `TDX_RESEARCH_ENV_FILE`）加载令牌与数据目录。systemd 与 PM2 二选一，不能同时打开同一 DuckDB。
+- 首次初始化顺序为 `down → import → update → daily`。新增 `cmd/tdx-down`，根据 `TDX_VIPDOC_DIR` 下载官方 hsjday 包到 `output/hsjday` 并解压；官方包含固定 `vipdoc/` 根目录，因此配置路径必须以 `/vipdoc` 结尾，且不得与 import 并发。

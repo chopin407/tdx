@@ -10,7 +10,7 @@ Group=tdx
 WorkingDirectory=/opt/tdx
 EnvironmentFile=/etc/tdx-research.env
 Environment=TZ=Asia/Shanghai
-ExecStart=/opt/tdx/output/bin/tdx-research -addr :8080 -db /opt/tdx/output/research/market.duckdb -import-dir /srv/tdx/vipdoc -schedule 19:00
+ExecStart=/opt/tdx/output/bin/tdx-research -addr :8080 -db /opt/tdx/output/research/market.duckdb -schedule 19:00
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=120

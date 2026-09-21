@@ -68,10 +68,26 @@ func milli(v float64) int64 { return int64(math.Round(v * 1000)) }
 
 // Dataset is a coherent in-memory snapshot, independent of subsequent updates.
 type Dataset struct {
-	Version        int64                       `json:"version"`
-	Bars           map[string][]Bar            `json:"bars"`
-	Actions        map[string][]*protocol.Gbbq `json:"actions"`
-	ActionsChecked map[string]bool             `json:"actions_checked"`
+	Version        int64                        `json:"version"`
+	Bars           map[string][]Bar             `json:"bars"`
+	Actions        map[string][]*protocol.Gbbq  `json:"actions"`
+	ActionsChecked map[string]bool              `json:"actions_checked"`
+	Profiles       map[string]InstrumentProfile `json:"profiles"`
+}
+
+// InstrumentProfile is current reference data. Historical simulations must
+// explicitly report that current names/industry/float shares are not point-in-time.
+type InstrumentProfile struct {
+	Symbol      string  `json:"symbol"`
+	Name        string  `json:"name"`
+	Industry    string  `json:"industry"`
+	IPODate     string  `json:"ipo_date"`
+	IsST        bool    `json:"is_st"`
+	FloatShares float64 `json:"float_shares"`
+	TotalShares float64 `json:"total_shares"`
+	FinanceDate string  `json:"finance_date"`
+	Source      string  `json:"source"`
+	PointInTime bool    `json:"point_in_time"`
 }
 
 // Adjust reuses tdx's affine adjustment, anchored at asOf, excluding later events.

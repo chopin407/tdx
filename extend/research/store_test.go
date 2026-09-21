@@ -142,7 +142,7 @@ func TestImportRerunAndHTTPWorkflow(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	for _, path := range []string{"/v1/status", "/v1/bars?symbol=sz000001&end=2025-01-10&adjust=qfq", "/v1/dataset?symbol=sz000001&end=2025-01-10"} {
+	for _, path := range []string{"/v1/status", "/v1/data-coverage", "/v1/bars?symbol=sz000001&end=2025-01-10&adjust=qfq", "/v1/dataset?symbol=sz000001&end=2025-01-10"} {
 		if w = call("GET", path, "", true); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
@@ -172,6 +172,10 @@ func TestImportRerunAndHTTPWorkflow(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	if w = call("POST", "/v1/reviews", `{"date":"2025-01-10"}`, true); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	w = call("POST", "/v1/mtfa/execution", `{"plan":{"trade_allowed":true,"trigger":10,"stop":9.5,"max_buy":10.3},"input":{"price":10.1,"market_permission":true,"account_permission":true,"mainline_valid":true,"liquidity_normal":true,"session_valid":true}}`, true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "order-allowed") {
 		t.Fatal(w.Body.String())
 	}
 	if w = call("PUT", "/v1/strategies/test", `{"kind":"ma_trend","fast":0,"slow":3,"lookback":3}`, true); w.Code != http.StatusBadRequest {
