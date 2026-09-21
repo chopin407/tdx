@@ -10,7 +10,7 @@ import (
 )
 
 func TestReadDay(t *testing.T) {
-	ks, err := ReadDay("D:\\软件\\通达信\\", "sz000001")
+	ks, err := ReadDay("D:\\new_tdx\\", "sz000001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestReadDay(t *testing.T) {
 
 func TestReadMinute(t *testing.T) {
 	// 1分钟 .lc1
-	ks, err := ReadMinute1("D:\\软件\\通达信\\", "sz000001")
+	ks, err := ReadMinute1("D:\\new_tdx\\", "sz000001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestReadMinute(t *testing.T) {
 			v.Amount.Float64(), v.Volume)
 	}
 	// 5分钟 .lc5
-	ks5, err := ReadMinute5("D:\\软件\\通达信\\", "sz000001")
+	ks5, err := ReadMinute5("D:\\new_tdx\\", "sz000001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestReadMinute(t *testing.T) {
 }
 
 func TestReadDayBJ(t *testing.T) {
-	ks, err := ReadDay("D:\\软件\\通达信\\", "bj920000")
+	ks, err := ReadDay("D:\\new_tdx\\", "bj920000")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,6 +44,13 @@ Debian 可使用 systemd，或通过 `deploy/tdx-research-pm2.sh` 管理 `pm2.co
 | 个股统计 / 资金流向    | ✅ 已完成 | `GetTdxStat` `GetTdxStat2`                      |
 | 新股申购           | ✅ 已完成 | `GetXgsg`                                       |
 | 扩展行情(期货/港股/外盘) | ✅ 已完成 | `DialExHq` + `ExQuote` `ExBars` `ExTrade` 等     |
+| TCP 长连接服务       | ✅ 已完成 | `extend/tcpserver`，完整复用 HTTP 行情接口             |
+
+---
+
+## 🔌 TCP 长连接服务
+
+`extend/tcpserver` 使用“4 字节大端长度 + JSON”协议，在一个连接上支持并发请求、请求 ID 关联、Token 鉴权、连接/并发/报文限制、超时和优雅关闭。它复用 `extend/httpserver` 的完整路由，因此行情、K 线、复权、分时成交、财务/F10、板块、行业、统计、资金流与扩展行情均可直接调用。详见 [TCP 服务说明](extend/tcpserver/README.md)。
 
 ---
 
