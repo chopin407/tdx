@@ -1,6 +1,7 @@
 package extend
 
 import (
+	archivezip "archive/zip"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	"github.com/injoyai/logs"
-	"github.com/injoyai/tdx/lib/zip"
+	ziputil "github.com/injoyai/tdx/lib/zip"
 )
 
 const (
@@ -39,7 +40,12 @@ type TdxHsjDayPackage struct {
 // GetTdxHsjDayPackage 获取沪深京日线数据完整包的最新信息(更新日期+文件大小+下载地址)
 // 数据来源: https://data.tdx.com.cn/vipdoc/_hsjdayinfo.js (vipdata.html 页面动态加载)
 func GetTdxHsjDayPackage() (*TdxHsjDayPackage, error) {
-	resp, err := http.Get(UrlTdxHsjDayInfo)
+	req, err := http.NewRequest(http.MethodGet, UrlTdxHsjDayInfo, nil)
+	if err != nil {
+		return nil, err
+	}
+	setTdxDownloadHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +58,43 @@ func GetTdxHsjDayPackage() (*TdxHsjDayPackage, error) {
 		return nil, err
 	}
 	return parseTdxHsjDay(string(body))
+}
+
+func setTdxDownloadHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128 Safari/537.36")
+	req.Header.Set("Referer", UrlTdxVipData)
+	req.Header.Set("Accept", "application/zip,application/octet-stream,*/*")
+}
+
+func validZipArchive(path string) error {
+	r, err := archivezip.OpenReader(path)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if len(r.File) == 0 {
+		return fmt.Errorf("zip archive contains no files")
+	}
+	return nil
+}
+
+func expectedPackageBytes(size string) int64 {
+	m := regexp.MustCompile(`(?i)^\s*([0-9]+(?:\.[0-9]+)?)\s*(KB|MB|GB)\s*$`).FindStringSubmatch(size)
+	if len(m) != 3 {
+		return 0
+	}
+	var value float64
+	if _, err := fmt.Sscanf(m[1], "%f", &value); err != nil {
+		return 0
+	}
+	multiplier := float64(1 << 10)
+	switch strings.ToUpper(m[2]) {
+	case "MB":
+		multiplier = 1 << 20
+	case "GB":
+		multiplier = 1 << 30
+	}
+	return int64(value * multiplier)
 }
 
 var (
@@ -90,6 +133,9 @@ func readLocalUpdateTime(dir string) (time.Time, error) {
 	infoPath := filepath.Join(dir, hsjdayInfoFile)
 	zipPath := filepath.Join(dir, hsjdayZipFile)
 	if !exists(zipPath) || !exists(infoPath) {
+		return time.Time{}, nil
+	}
+	if err := validZipArchive(zipPath); err != nil {
 		return time.Time{}, nil
 	}
 	bs, err := os.ReadFile(infoPath)
@@ -134,7 +180,17 @@ func DownloadTdxHsjDay(dir string) (string, error) {
 		return zipPath, nil
 	}
 
-	resp, err := http.Get(info.Url)
+	return downloadTdxHsjDayPackage(info, dir)
+}
+
+func downloadTdxHsjDayPackage(info *TdxHsjDayPackage, dir string) (string, error) {
+	zipPath := filepath.Join(dir, hsjdayZipFile)
+	req, err := http.NewRequest(http.MethodGet, info.Url, nil)
+	if err != nil {
+		return "", err
+	}
+	setTdxDownloadHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -149,7 +205,8 @@ func DownloadTdxHsjDay(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	written, err := io.Copy(f, resp.Body)
+	if err != nil {
 		f.Close()
 		os.Remove(partPath)
 		return "", err
@@ -157,6 +214,20 @@ func DownloadTdxHsjDay(dir string) (string, error) {
 	if err := f.Close(); err != nil {
 		os.Remove(partPath)
 		return "", err
+	}
+	if expected := expectedPackageBytes(info.Size); expected > 0 && written < expected*9/10 {
+		os.Remove(partPath)
+		return "", fmt.Errorf("downloaded body is too small: got %d bytes, expected about %d; content-type=%q", written, expected, resp.Header.Get("Content-Type"))
+	}
+	if err := validZipArchive(partPath); err != nil {
+		preview := make([]byte, 160)
+		if source, openErr := os.Open(partPath); openErr == nil {
+			n, _ := source.Read(preview)
+			preview = preview[:n]
+			source.Close()
+		}
+		os.Remove(partPath)
+		return "", fmt.Errorf("downloaded response is not a valid zip (%d bytes, content-type=%q, prefix=%q): %w", written, resp.Header.Get("Content-Type"), preview, err)
 	}
 	if err := os.Rename(partPath, zipPath); err != nil {
 		os.Remove(partPath)
@@ -186,7 +257,10 @@ func UnzipHsjDay(zipPath, dataDir string) error {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
 	}
-	if err := zip.Decode(zipPath, dataDir); err != nil {
+	if err := validZipArchive(zipPath); err != nil {
+		return fmt.Errorf("zip 校验失败: %w", err)
+	}
+	if err := ziputil.Decode(zipPath, dataDir); err != nil {
 		return fmt.Errorf("解压失败: %w", err)
 	}
 	logs.Infof("解压完成: %s -> %s\n", zipPath, dataDir)
