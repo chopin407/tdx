@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -95,6 +96,51 @@ func expectedPackageBytes(size string) int64 {
 		multiplier = 1 << 30
 	}
 	return int64(value * multiplier)
+}
+
+func downloadWithCurl(url, path string) (int64, error) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		return 0, fmt.Errorf("curl 不可用: %w", err)
+	}
+	cmd := exec.Command("curl",
+		"--silent", "--show-error", "--fail", "--location",
+		"--retry", "2", "--retry-delay", "2", "--connect-timeout", "30",
+		"--user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128 Safari/537.36",
+		"--referer", UrlTdxVipData,
+		"--output", path, url,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.Remove(path)
+		return 0, err
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return stat.Size(), nil
+}
+
+func validateDownloadedPackage(path, size string, written int64) error {
+	if expected := expectedPackageBytes(size); expected > 0 && written < expected*9/10 {
+		return fmt.Errorf("响应体过小: 实际 %d 字节, 预期约 %d 字节", written, expected)
+	}
+	if err := validZipArchive(path); err != nil {
+		return fmt.Errorf("不是有效 ZIP: %w", err)
+	}
+	return nil
+}
+
+func filePrefix(path string, limit int) string {
+	preview := make([]byte, limit)
+	source, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer source.Close()
+	n, _ := source.Read(preview)
+	return string(preview[:n])
 }
 
 var (
@@ -215,19 +261,22 @@ func downloadTdxHsjDayPackage(info *TdxHsjDayPackage, dir string) (string, error
 		os.Remove(partPath)
 		return "", err
 	}
-	if expected := expectedPackageBytes(info.Size); expected > 0 && written < expected*9/10 {
+	if validationErr := validateDownloadedPackage(partPath, info.Size, written); validationErr != nil {
+		goPrefix := filePrefix(partPath, 160)
 		os.Remove(partPath)
-		return "", fmt.Errorf("downloaded body is too small: got %d bytes, expected about %d; content-type=%q", written, expected, resp.Header.Get("Content-Type"))
-	}
-	if err := validZipArchive(partPath); err != nil {
-		preview := make([]byte, 160)
-		if source, openErr := os.Open(partPath); openErr == nil {
-			n, _ := source.Read(preview)
-			preview = preview[:n]
-			source.Close()
+		if info.Url != UrlTdxHsjDayZip {
+			return "", fmt.Errorf("下载内容校验失败 (%s, content-type=%q, prefix=%q): %w", info.Url, resp.Header.Get("Content-Type"), goPrefix, validationErr)
 		}
-		os.Remove(partPath)
-		return "", fmt.Errorf("downloaded response is not a valid zip (%d bytes, content-type=%q, prefix=%q): %w", written, resp.Header.Get("Content-Type"), preview, err)
+		logs.Infof("Go HTTP 收到无效内容，改用系统 curl 重试: %v\n", validationErr)
+		curlWritten, curlErr := downloadWithCurl(info.Url, partPath)
+		if curlErr != nil {
+			return "", fmt.Errorf("Go HTTP 响应无效 (content-type=%q, prefix=%q)，curl 重试失败: %w", resp.Header.Get("Content-Type"), goPrefix, curlErr)
+		}
+		if curlValidationErr := validateDownloadedPackage(partPath, info.Size, curlWritten); curlValidationErr != nil {
+			curlPrefix := filePrefix(partPath, 160)
+			os.Remove(partPath)
+			return "", fmt.Errorf("Go HTTP 与 curl 均收到无效内容; curl prefix=%q: %w", curlPrefix, curlValidationErr)
+		}
 	}
 	if err := os.Rename(partPath, zipPath); err != nil {
 		os.Remove(partPath)

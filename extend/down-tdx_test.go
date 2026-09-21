@@ -121,7 +121,7 @@ func TestDownloadTdxHsjDayPackageRejectsHTML(t *testing.T) {
 		Size:       "524.79MB",
 		Url:        server.URL,
 	}, dir)
-	if err == nil || !strings.Contains(err.Error(), "too small") {
+	if err == nil || !strings.Contains(err.Error(), "响应体过小") {
 		t.Fatalf("expected too-small error, got %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, hsjdayPartFile)); !os.IsNotExist(statErr) {

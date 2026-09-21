@@ -99,7 +99,7 @@ chmod +x deploy/tdx-research-pm2.sh
 
 `down` 使用通达信官方完整日线包下载器，压缩包缓存在 `output/hsjday`，并解压到 `TDX_VIPDOC_DIR`。由于官方压缩包固定包含 `vipdoc/` 根目录，配置路径必须以 `/vipdoc` 结尾。不要在 `import` 正在读取目录时执行 `down`。
 
-下载器会校验公告文件大小和 ZIP 目录。若 CDN 以 HTTP 200 返回限流页面或截断内容，命令会删除 `.part` 并在下载阶段报告实际字节数、Content-Type 和响应前缀；已有损坏缓存也会自动识别并重新下载，无需手工清理 `hsjday.txt`。
+下载器会校验公告文件大小和 ZIP 目录。若 CDN 以 HTTP 200 向 Go 客户端返回限流页面或截断内容，命令会自动改用系统 `curl` 重试，并对重试结果执行相同校验；两种方式均失败时会删除 `.part`，报告实际字节数、Content-Type 和响应前缀。Debian 需安装 `curl`。已有损坏缓存也会自动识别并重新下载，无需手工清理 `hsjday.txt`。
 
 修改 `/etc/tdx-research.env` 后使用 `restart` 或 `reload`，脚本会带 `--update-env`。执行 `pm2 startup` 和脚本的 `start` 后，`pm2 save` 会保存进程清单。若环境文件不在 `/etc`，可设置 `TDX_RESEARCH_ENV_FILE=/path/to/file`；API 地址可通过 `TDX_RESEARCH_BASE_URL` 覆盖。
 
