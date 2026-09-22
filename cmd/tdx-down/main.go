@@ -27,9 +27,9 @@ func run() error {
 	}
 	clean := filepath.Clean(*vipdoc)
 	if !strings.EqualFold(filepath.Base(clean), "vipdoc") {
-		return fmt.Errorf("vipdoc directory must end with %q because the official archive contains a vipdoc root: %s", "vipdoc", clean)
+		return fmt.Errorf("vipdoc directory must end with %q: %s", "vipdoc", clean)
 	}
-	zipPath, err := extend.DownloadAndUnzipHsjDay(*download, filepath.Dir(clean))
+	zipPath, err := extend.DownloadAndUnzipHsjDay(*download, clean)
 	if err != nil {
 		return err
 	}

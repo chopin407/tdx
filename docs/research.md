@@ -97,7 +97,7 @@ chmod +x deploy/tdx-research-pm2.sh
 ./deploy/tdx-research-pm2.sh daily
 ```
 
-`down` 使用通达信官方完整日线包下载器，压缩包缓存在 `output/hsjday`，并解压到 `TDX_VIPDOC_DIR`。由于官方压缩包固定包含 `vipdoc/` 根目录，配置路径必须以 `/vipdoc` 结尾。不要在 `import` 正在读取目录时执行 `down`。
+`down` 使用通达信官方完整日线包下载器，压缩包缓存在 `output/hsjday`，并直接解压到 `TDX_VIPDOC_DIR`。配置路径必须以 `/vipdoc` 结尾。下载器兼容压缩包有无 `vipdoc` 根目录以及 Windows 反斜杠条目，不会要求运行用户拥有 `vipdoc` 父目录的写权限。不要在 `import` 正在读取目录时执行 `down`。
 
 下载器会校验公告文件大小和 ZIP 目录。若 CDN 以 HTTP 200 向 Go 客户端返回限流页面或截断内容，命令会自动改用系统 `curl` 重试，并对重试结果执行相同校验；两种方式均失败时会删除 `.part`，报告实际字节数、Content-Type 和响应前缀。Debian 需安装 `curl`。已有损坏缓存也会自动识别并重新下载，无需手工清理 `hsjday.txt`。
 

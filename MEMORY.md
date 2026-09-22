@@ -117,5 +117,5 @@
 - `cmd/tdx-research` 不再内置任何机器的数据路径；离线目录只通过 `TDX_VIPDOC_DIR` 或优先级更高的 `-import-dir` 配置，且必须是绝对路径。Debian systemd 从 `/etc/tdx-research.env` 读取；服务与原行情并行时建议研究端口 8081。
 - 新增 `/v1/mtfa/screens`、`/v1/mtfa/latest`、`/v1/mtfa/execution`、`/v1/mtfa/backtests`、`/v1/data-coverage`；每日任务保存 review+mtfa 的 daily-bundle。`G:\financial\a-stock-dashboard` 通过服务端代理调用这些接口，令牌不下发浏览器。
 - Debian PM2 管理由 `pm2.config.js` 中的 `tdx-research` 应用和 `deploy/tdx-research-pm2.sh` 提供；默认研究端口8081，只从 `/etc/tdx-research.env`（或 `TDX_RESEARCH_ENV_FILE`）加载令牌与数据目录。systemd 与 PM2 二选一，不能同时打开同一 DuckDB。
-- 首次初始化顺序为 `down → import → update → daily`。新增 `cmd/tdx-down`，根据 `TDX_VIPDOC_DIR` 下载官方 hsjday 包到 `output/hsjday` 并解压；官方包含固定 `vipdoc/` 根目录，因此配置路径必须以 `/vipdoc` 结尾，且不得与 import 并发。
+- 首次初始化顺序为 `down → import → update → daily`。`cmd/tdx-down` 根据 `TDX_VIPDOC_DIR` 下载官方 hsjday 包到 `output/hsjday`，直接解压到配置的 vipdoc 目录；解压器统一 ZIP 内的 Windows 反斜杠，剥离可选 `vipdoc/` 前缀并防止路径穿越，因此不再要求父目录可写。配置路径仍须以 `/vipdoc` 结尾，且 down 不得与 import 并发。
 12. **TCP 长连接服务（2026-09）**：`extend/tcpserver` 以 4 字节大端长度帧承载 JSON，通过内存 HTTP 请求复用 `extend/httpserver` 全部只读路由；action 为去掉前导 `/` 的 HTTP 路径。支持并发请求 ID 关联、Token、帧/连接/并发限制、超时和优雅关闭，并提供 Go Client。新增 HTTP 路由会自动被 TCP 复用，无需再写一套业务 handler。

@@ -178,3 +178,57 @@ func TestUnzipHsjDayMissingFile(t *testing.T) {
 	}
 	t.Log(err)
 }
+
+func TestUnzipHsjDayNormalizesWindowsPathsIntoVipdoc(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "hsjday.zip")
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	f, err := w.Create(`vipdoc\sh\lday\sh000001.day`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("day-data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vipdoc := filepath.Join(dir, "vipdoc")
+	if err := UnzipHsjDay(zipPath, vipdoc); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(vipdoc, "sh", "lday", "sh000001.day"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "day-data" {
+		t.Fatalf("got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, `sh\lday\sh000001.day`)); !os.IsNotExist(err) {
+		t.Fatalf("file escaped configured vipdoc: %v", err)
+	}
+}
+
+func TestUnzipHsjDayRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "bad.zip")
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	if _, err := w.Create(`vipdoc\..\outside.day`); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UnzipHsjDay(zipPath, filepath.Join(dir, "vipdoc")); err == nil {
+		t.Fatal("expected traversal error")
+	}
+}

@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/injoyai/logs"
-	ziputil "github.com/injoyai/tdx/lib/zip"
 )
 
 const (
@@ -296,36 +296,96 @@ func downloadTdxHsjDayPackage(info *TdxHsjDayPackage, dir string) (string, error
 	return zipPath, nil
 }
 
-// UnzipHsjDay 解压沪深京日线数据完整包到指定数据目录
+// UnzipHsjDay 解压沪深京日线数据完整包到指定 vipdoc 目录
 // zipPath: 已下载的 hsjday.zip 路径
-// dataDir: 解压目标目录(如 ./data/vipdoc),zip 内含 vipdoc/<sh|sz|bj>/lday/*.day
-func UnzipHsjDay(zipPath, dataDir string) error {
+// vipdocDir: 解压目标 vipdoc 目录。官方包可能包含 vipdoc 根目录，也可能使用 Windows 反斜杠路径。
+func UnzipHsjDay(zipPath, vipdocDir string) error {
 	if !exists(zipPath) {
 		return fmt.Errorf("zip 文件不存在: %s", zipPath)
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(vipdocDir, 0o755); err != nil {
 		return err
 	}
-	if err := validZipArchive(zipPath); err != nil {
+	root, err := filepath.Abs(vipdocDir)
+	if err != nil {
+		return err
+	}
+	r, err := archivezip.OpenReader(zipPath)
+	if err != nil {
 		return fmt.Errorf("zip 校验失败: %w", err)
 	}
-	if err := ziputil.Decode(zipPath, dataDir); err != nil {
-		return fmt.Errorf("解压失败: %w", err)
+	defer r.Close()
+	for _, entry := range r.File {
+		rawName := strings.ReplaceAll(entry.Name, "\\", "/")
+		for _, component := range strings.Split(rawName, "/") {
+			if component == ".." {
+				return fmt.Errorf("zip 包含非法路径: %q", entry.Name)
+			}
+		}
+		name := path.Clean(rawName)
+		name = strings.TrimPrefix(name, "./")
+		if name == "." || strings.EqualFold(name, "vipdoc") {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(name), "vipdoc/") {
+			name = name[len("vipdoc/"):]
+		}
+		if name == "" || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+			return fmt.Errorf("zip 包含非法路径: %q", entry.Name)
+		}
+		destination := filepath.Join(root, filepath.FromSlash(name))
+		rel, relErr := filepath.Rel(root, destination)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("zip 路径越界: %q", entry.Name)
+		}
+		if entry.FileInfo().IsDir() {
+			if err := os.MkdirAll(destination, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if !entry.Mode().IsRegular() {
+			return fmt.Errorf("zip 包含不支持的非普通文件: %q", entry.Name)
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return err
+		}
+		source, err := entry.Open()
+		if err != nil {
+			return err
+		}
+		target, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			source.Close()
+			return err
+		}
+		_, copyErr := io.Copy(target, source)
+		closeTargetErr := target.Close()
+		closeSourceErr := source.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeTargetErr != nil {
+			return closeTargetErr
+		}
+		if closeSourceErr != nil {
+			return closeSourceErr
+		}
 	}
-	logs.Infof("解压完成: %s -> %s\n", zipPath, dataDir)
+	logs.Infof("解压完成: %s -> %s\n", zipPath, root)
 	return nil
 }
 
 // DownloadAndUnzipHsjDay 下载并解压沪深京日线数据完整包
 // downloadDir: zip 下载目录(如 ./output/hsjday/)
-// dataDir: 解压目标目录(如 ./data)
+// vipdocDir: 解压目标 vipdoc 目录(如 ./data/vipdoc)
 // 返回下载的 zip 文件路径
-func DownloadAndUnzipHsjDay(downloadDir, dataDir string) (string, error) {
+func DownloadAndUnzipHsjDay(downloadDir, vipdocDir string) (string, error) {
 	zipPath, err := DownloadTdxHsjDay(downloadDir)
 	if err != nil {
 		return "", err
 	}
-	if err := UnzipHsjDay(zipPath, dataDir); err != nil {
+	if err := UnzipHsjDay(zipPath, vipdocDir); err != nil {
 		return zipPath, err
 	}
 	return zipPath, nil
