@@ -6,7 +6,7 @@ import (
 )
 
 // Strategy is the shared, versioned signal definition for screening and tests.
-// ma_trend holds while fast MA > slow MA; breakout holds above its exit MA.
+// ma_trend and breakout are daily rules; weekly patterns require completed weeks.
 type Strategy struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
@@ -21,8 +21,8 @@ func (s Strategy) Validate() error {
 	if !idRE.MatchString(s.ID) {
 		return fmt.Errorf("strategy id: use 1-64 letters, digits, _ or -")
 	}
-	if s.Kind != "ma_trend" && s.Kind != "breakout" {
-		return fmt.Errorf("kind must be ma_trend or breakout")
+	if s.Kind != "ma_trend" && s.Kind != "breakout" && s.Kind != "weekly_cup_handle" && s.Kind != "weekly_double_bottom" && s.Kind != "weekly_platform_hold" {
+		return fmt.Errorf("kind must be ma_trend, breakout, weekly_cup_handle, weekly_double_bottom or weekly_platform_hold")
 	}
 	if s.Fast < 1 || s.Slow <= s.Fast || s.Slow > 500 || s.Lookback < 1 || s.Lookback > 500 || !finite(s.MinAmount) || s.MinAmount < 0 {
 		return fmt.Errorf("require 1 <= fast < slow <= 500, 1 <= lookback <= 500, min_amount >= 0")
@@ -30,6 +30,9 @@ func (s Strategy) Validate() error {
 	return nil
 }
 func (s Strategy) Warmup() int {
+	if s.Kind == "weekly_cup_handle" || s.Kind == "weekly_double_bottom" || s.Kind == "weekly_platform_hold" {
+		return 160 // Enough history for bounded weekly pattern search.
+	}
 	n := s.Slow
 	if s.Kind == "breakout" && s.Lookback+1 > n {
 		n = s.Lookback + 1
@@ -62,6 +65,15 @@ func Evaluate(s Strategy, bars []Bar) Signal {
 		return v
 	}
 	v.Ready = true
+	if s.Kind == "weekly_cup_handle" {
+		return evaluateWeeklyCupHandle(s, bars)
+	}
+	if s.Kind == "weekly_double_bottom" {
+		return evaluateWeeklyDoubleBottom(s, bars)
+	}
+	if s.Kind == "weekly_platform_hold" {
+		return evaluateWeeklyPlatformHold(s, bars)
+	}
 	for _, b := range bars[len(bars)-s.Fast:] {
 		v.FastMA += b.Close / float64(s.Fast)
 	}

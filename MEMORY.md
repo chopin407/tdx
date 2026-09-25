@@ -15,6 +15,10 @@
 
 ## 架构
 
+- 2026-09-24：通用策略新增 `weekly_cup_handle`（`extend/research/weekly_cup_handle.go`），沿用日线前复权数据在信号日聚合已完成周线；只接受周五完成周，在 8–24 周勺底和 1–3 周缩量整理窗口内寻找放量突破后的反包，记录实际周数和量价证据。`Warmup=160` 日线，默认策略仅在 ID 缺失时写入，不覆盖现有用户策略；此研究信号不等于 MTF-A 交易许可。节假日短周与历史 ST/规模字段仍是已知数据缺口。
+- 2026-09-24：通用策略新增 `weekly_double_bottom`（`extend/research/weekly_double_bottom.go`），复用已完成周线聚合，辨认两个相隔 3–10 周的局部低点、有效颈线、第二底承接与首次放量破颈线；信号证据列出低点日期/价格、颈线和量比。默认 ID 仅缺失时写入，不覆盖用户策略；与 MTF-A 交易许可独立。
+- 2026-09-24：通用策略新增 `weekly_platform_hold`（`extend/research/weekly_platform_hold.go`），识别 6–20 周多次底部回踩的平台、放量突破和后续 1–3 周缩量守住平台上沿。信号是观察状态，非立即买入或 MTF-A 交易许可；默认 ID 仅缺失时写入。
+
 - `protocol/`：协议帧编解码与数据结构（`model_*.go`、`unit.go`、`frame.go`、`types.go`）。
 - `client.go` / `client_exhq.go`：连接与业务 API。
 - `extend/`：离线数据读取(`local.go`)、行情拉取、爬虫、HTTP server、指标计算(`model_kline.go`)。

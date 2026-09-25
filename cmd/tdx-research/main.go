@@ -72,6 +72,42 @@ func run() error {
 			return err
 		}
 	}
+	foundCup := false
+	for _, strategy := range strategies {
+		if strategy.ID == "weekly_cup_handle" {
+			foundCup = true
+			break
+		}
+	}
+	if !foundCup {
+		if err = store.SaveStrategy(ctx, research.Strategy{ID: "weekly_cup_handle", Name: "周线勺柄·双周缩量·反包", Kind: "weekly_cup_handle", Fast: 5, Slow: 20, Lookback: 20, MinAmount: 50000000}); err != nil {
+			return err
+		}
+	}
+	foundDoubleBottom := false
+	for _, strategy := range strategies {
+		if strategy.ID == "weekly_double_bottom" {
+			foundDoubleBottom = true
+			break
+		}
+	}
+	if !foundDoubleBottom {
+		if err = store.SaveStrategy(ctx, research.Strategy{ID: "weekly_double_bottom", Name: "周线W双底·放量破颈线", Kind: "weekly_double_bottom", Fast: 5, Slow: 20, Lookback: 20, MinAmount: 50000000}); err != nil {
+			return err
+		}
+	}
+	foundPlatform := false
+	for _, strategy := range strategies {
+		if strategy.ID == "weekly_platform_hold" {
+			foundPlatform = true
+			break
+		}
+	}
+	if !foundPlatform {
+		if err = store.SaveStrategy(ctx, research.Strategy{ID: "weekly_platform_hold", Name: "周线平台底·放量突破·缩量不破", Kind: "weekly_platform_hold", Fast: 5, Slow: 20, Lookback: 20, MinAmount: 50000000}); err != nil {
+			return err
+		}
+	}
 	var factory research.SourceFactory
 	if !*offline {
 		factory = func(ctx context.Context) (research.Source, func(), error) {
