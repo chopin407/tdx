@@ -25,7 +25,6 @@ type Job struct {
 	Failures      int               `json:"failures"`
 	Errors        map[string]string `json:"errors,omitempty"`
 	Error         string            `json:"error,omitempty"`
-	ArtifactID    string            `json:"artifact_id,omitempty"`
 	ScheduledDate string            `json:"scheduled_date,omitempty"`
 }
 type Config struct {
@@ -143,36 +142,6 @@ func (s *Service) run(j Job, symbols []string) {
 			err = s.Store.Update(s.ctx, source, symbols, cutoff, progress)
 		}
 	}
-	if err == nil && j.Kind == "daily" {
-		var d *Dataset
-		d, err = s.Store.SnapshotWindow(s.ctx, nil, cutoff, 501)
-		if err == nil {
-			date := ""
-			for symbol, bars := range d.Bars {
-				if kind(symbol) == "stock" && len(bars) > 0 && bars[len(bars)-1].Date > date {
-					date = bars[len(bars)-1].Date
-				}
-			}
-			if date == "" {
-				err = fmt.Errorf("no completed A-share bars for review")
-			} else {
-				var strategies []Strategy
-				strategies, err = s.Store.Strategies(s.ctx)
-				if err == nil {
-					var review ReviewResult
-					review, err = Review(d, date, strategies)
-					if err == nil {
-						var mtfa MTFAScanResult
-						mtfa, err = ScanMTFA(d, date, DefaultMTFAConfig())
-						if err == nil {
-							j.ArtifactID = uuid.NewString()
-							err = s.Store.Artifact(s.ctx, j.ArtifactID, "daily-bundle", map[string]any{"review": review, "mtfa": mtfa})
-						}
-					}
-				}
-			}
-		}
-	}
 	j.State = "succeeded"
 	if err != nil {
 		j.State = "failed"
@@ -186,8 +155,8 @@ func (s *Service) run(j Job, symbols []string) {
 	}
 }
 
-// StartScheduler catches up after restart. Holidays are not guessed: the review
-// is dated using actual returned bars. At most three attempts per calendar day.
+// StartScheduler catches up after restart and updates completed daily data.
+// At most three attempts are made per calendar day.
 func (s *Service) StartScheduler() {
 	if s.Config.Schedule == "" || s.Factory == nil {
 		return

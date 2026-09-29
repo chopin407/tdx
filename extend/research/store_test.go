@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -17,6 +16,93 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/injoyai/tdx/protocol"
 )
+
+func TestHistoryBarsPageFromDuckDB(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	if err := s.Upsert(ctx, "sz000001", fixtureBars(10), []*protocol.Gbbq{}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(ctx, s, Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	handler := Authenticate("test-token-for-local", service.Handler())
+	call := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer test-token-for-local")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+	var response struct {
+		Data BarPage `json:"data"`
+	}
+	first := call("/v1/history/bars?symbol=sz000001&end=2025-01-10&limit=3")
+	if first.Code != 200 {
+		t.Fatal(first.Body.String())
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data.Bars) != 3 || response.Data.Bars[0].Date != "2025-01-08" || response.Data.Bars[2].Date != "2025-01-10" ||
+		!response.Data.HasMore || response.Data.NextBefore != "2025-01-08" {
+		t.Fatal(response.Data)
+	}
+	version := response.Data.DatasetVersion
+	second := call(fmt.Sprintf("/v1/history/bars?symbol=sz000001&end=2025-01-10&before=%s&limit=3&version=%d&adjust=qfq", response.Data.NextBefore, version))
+	if second.Code != 200 {
+		t.Fatal(second.Body.String())
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data.Bars) != 3 || response.Data.Bars[0].Date != "2025-01-05" || response.Data.Bars[2].Date != "2025-01-07" {
+		t.Fatal(response.Data)
+	}
+	if w := call("/v1/history/bars?symbol=sz000001&end=2025-01-10&start=2025-01-09&limit=3"); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), "\"has_more\":false") {
+		t.Fatal(w.Body.String())
+	}
+	if w := call("/v1/history/bars?symbol=sz000001&end=2025-01-10&limit=1001"); w.Code != 400 {
+		t.Fatal(w.Body.String())
+	}
+	if err := s.Upsert(ctx, "sz000001", fixtureBars(10), []*protocol.Gbbq{}); err != nil {
+		t.Fatal(err)
+	}
+	if w := call(fmt.Sprintf("/v1/history/bars?symbol=sz000001&end=2025-01-10&version=%d", version)); w.Code != 409 {
+		t.Fatal(w.Body.String())
+	}
+	if err := s.Upsert(ctx, "sz000001", fixtureBars(10), nil); err != nil {
+		t.Fatal(err)
+	}
+	if w := call("/v1/history/bars?symbol=sz000001&end=2025-01-10&adjust=qfq"); w.Code != 409 {
+		t.Fatal(w.Body.String())
+	}
+}
+
+func TestHistoryAdjustedPagesKeepEndDateAnchor(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	eventDate, _ := parseDate("2025-01-06")
+	actions := []*protocol.Gbbq{{Code: "sz000001", Time: eventDate.Add(15 * time.Hour), Category: 1, C1: 10}}
+	if err := s.Upsert(ctx, "sz000001", fixtureBars(10), actions); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.QueryBarsPage(ctx, "sz000001", "", "2025-01-10", "", "qfq", 3, nil)
+	if err != nil || first.NextBefore != "2025-01-08" {
+		t.Fatal(first, err)
+	}
+	second, err := s.QueryBarsPage(ctx, "sz000001", "", "2025-01-10", first.NextBefore, "qfq", 3, &first.DatasetVersion)
+	if err != nil || len(second.Bars) != 3 || second.Bars[0].Date != "2025-01-05" {
+		t.Fatal(second, err)
+	}
+	want := fixtureBars(10)[4].Close - 1
+	if second.Bars[0].Close != want {
+		t.Fatalf("adjusted close %.3f, want %.3f", second.Bars[0].Close, want)
+	}
+}
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
@@ -138,56 +224,21 @@ func TestImportRerunAndHTTPWorkflow(t *testing.T) {
 	if w := call("GET", "/v1/status", "", false); w.Code != 401 {
 		t.Fatal(w.Code)
 	}
-	w := call("PUT", "/v1/strategies/test", `{"kind":"ma_trend","fast":2,"slow":3,"lookback":3}`, true)
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
+	var w *httptest.ResponseRecorder
 	for _, path := range []string{"/v1/status", "/v1/data-coverage", "/v1/bars?symbol=sz000001&end=2025-01-10&adjust=qfq", "/v1/dataset?symbol=sz000001&end=2025-01-10"} {
 		if w = call("GET", path, "", true); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
 	}
-	w = call("POST", "/v1/screens", `{"strategy_id":"test","date":"2025-01-10"}`, true)
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	request, _ := json.Marshal(map[string]any{"strategy_id": "test", "config": fixtureConfig()})
-	w = call("POST", "/v1/backtests", string(request), true)
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	var response struct {
-		Data struct {
-			ID        string `json:"id"`
-			DatasetID string `json:"dataset_id"`
-		} `json:"data"`
-	}
-	if err = json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Data.DatasetID == "" {
-		t.Fatal("missing reproducibility snapshot")
-	}
-	if w = call("GET", "/v1/artifacts/"+response.Data.DatasetID, "", true); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	if w = call("POST", "/v1/reviews", `{"date":"2025-01-10"}`, true); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	w = call("POST", "/v1/mtfa/execution", `{"plan":{"trade_allowed":true,"trigger":10,"stop":9.5,"max_buy":10.3},"input":{"price":10.1,"market_permission":true,"account_permission":true,"mainline_valid":true,"liquidity_normal":true,"session_valid":true}}`, true)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "order-allowed") {
-		t.Fatal(w.Body.String())
-	}
-	if w = call("PUT", "/v1/strategies/test", `{"kind":"ma_trend","fast":0,"slow":3,"lookback":3}`, true); w.Code != http.StatusBadRequest {
-		t.Fatal(w.Code)
+	for _, path := range []string{"/v1/strategies", "/v1/mtfa/latest", "/v1/artifacts/old"} {
+		if w = call("GET", path, "", true); w.Code != 404 {
+			t.Fatalf("removed route %s returned %d", path, w.Code)
+		}
 	}
 }
-func TestDailyJobPersistsReview(t *testing.T) {
+func TestDailyJobUpdatesData(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	if err := s.SaveStrategy(ctx, fixtureStrategy()); err != nil {
-		t.Fatal(err)
-	}
 	service, err := NewService(ctx, s, Config{}, func(context.Context) (Source, func(), error) {
 		return fakeSource{fixtureBars(10), false}, func() {}, nil
 	})
@@ -207,8 +258,12 @@ func TestDailyJobPersistsReview(t *testing.T) {
 		}
 		for _, v := range jobs {
 			if v.ID == j.ID && v.State != "running" {
-				if v.State != "succeeded" || v.ArtifactID == "" {
+				if v.State != "succeeded" || v.Rows == 0 {
 					t.Fatal(v)
+				}
+				d, e := s.Snapshot(ctx, []string{"sz000001"}, "2025-01-10")
+				if e != nil || len(d.Bars["sz000001"]) == 0 {
+					t.Fatal(d, e)
 				}
 				return
 			}

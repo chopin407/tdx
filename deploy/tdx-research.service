@@ -1,5 +1,5 @@
 [Unit]
-Description=TDX daily research service
+Description=TDX historical data and quote service
 After=network-online.target
 Wants=network-online.target
 

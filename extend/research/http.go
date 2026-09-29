@@ -2,16 +2,14 @@ package research
 
 import (
 	"crypto/subtle"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func timeNow() time.Time { return time.Now() }
@@ -32,6 +30,7 @@ func reply(w http.ResponseWriter, status int, v any, err error) {
 	w.WriteHeader(status)
 	_, _ = w.Write(raw)
 }
+
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024*1024))
 	d.DisallowUnknownFields()
@@ -45,7 +44,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) error {
 	return nil
 }
 
-// Authenticate protects both live and research routes when wrapped by main.
+// Authenticate protects both live and historical-data routes.
 func Authenticate(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -57,39 +56,11 @@ func Authenticate(token string, next http.Handler) http.Handler {
 	})
 }
 
-// Handler exposes research routes separately from existing live行情 routes.
+// Handler exposes data import, coverage and historical bars without trading routes.
 func (s *Service) Handler() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /v1/data-issues", func(w http.ResponseWriter, r *http.Request) {
-		symbol := r.URL.Query().Get("symbol")
-		if !symbolRE.MatchString(symbol) {
-			reply(w, 400, nil, fmt.Errorf("valid symbol required"))
-			return
-		}
-		rows, err := s.Store.db.QueryContext(r.Context(), "SELECT symbol,date_text,row_no,file_hash,reason,raw_hex FROM data_issues WHERE symbol=? ORDER BY date_text,row_no LIMIT 1000", symbol)
-		if err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		defer rows.Close()
-		issues := []DataIssue{}
-		for rows.Next() {
-			var v DataIssue
-			if err = rows.Scan(&v.Symbol, &v.Date, &v.Row, &v.FileHash, &v.Reason, &v.RawHex); err != nil {
-				reply(w, 500, nil, err)
-				return
-			}
-			issues = append(issues, v)
-		}
-		if err = rows.Err(); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, map[string]any{"issues": issues, "limit": 1000}, nil)
-	})
 	m.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
-		err := s.Store.db.PingContext(r.Context())
-		if err != nil {
+		if err := s.Store.db.PingContext(r.Context()); err != nil {
 			reply(w, 503, nil, err)
 			return
 		}
@@ -119,6 +90,52 @@ func (s *Service) Handler() http.Handler {
 		}
 		reply(w, 200, map[string]any{"instruments": items, "closed_through": ClosedThrough(timeNow()), "price_unit": "CNY", "stock_volume_unit": "shares", "index_volume_unit": "lots", "schedule": s.Config.Schedule}, nil)
 	})
+	m.HandleFunc("GET /v1/data-issues", func(w http.ResponseWriter, r *http.Request) {
+		symbol := r.URL.Query().Get("symbol")
+		if !symbolRE.MatchString(symbol) {
+			reply(w, 400, nil, fmt.Errorf("valid symbol required"))
+			return
+		}
+		rows, err := s.Store.db.QueryContext(r.Context(), "SELECT symbol,date_text,row_no,file_hash,reason,raw_hex FROM data_issues WHERE symbol=? ORDER BY date_text,row_no LIMIT 1000", symbol)
+		if err != nil {
+			reply(w, 500, nil, err)
+			return
+		}
+		defer rows.Close()
+		issues := []DataIssue{}
+		for rows.Next() {
+			var v DataIssue
+			if err = rows.Scan(&v.Symbol, &v.Date, &v.Row, &v.FileHash, &v.Reason, &v.RawHex); err != nil {
+				reply(w, 500, nil, err)
+				return
+			}
+			issues = append(issues, v)
+		}
+		if err = rows.Err(); err != nil {
+			reply(w, 500, nil, err)
+			return
+		}
+		reply(w, 200, map[string]any{"issues": issues, "limit": 1000}, nil)
+	})
+	m.HandleFunc("GET /v1/data-coverage", func(w http.ResponseWriter, r *http.Request) {
+		var bars, profiles, checked, issues int64
+		var first, last string
+		err := s.Store.db.QueryRowContext(r.Context(), "SELECT count(DISTINCT symbol),COALESCE(CAST(min(date) AS VARCHAR),''),COALESCE(CAST(max(date) AS VARCHAR),'') FROM bars_daily").Scan(&bars, &first, &last)
+		if err == nil {
+			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM instrument_profiles").Scan(&profiles)
+		}
+		if err == nil {
+			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM instruments WHERE actions_checked").Scan(&checked)
+		}
+		if err == nil {
+			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM data_issues").Scan(&issues)
+		}
+		if err != nil {
+			reply(w, 500, nil, err)
+			return
+		}
+		reply(w, 200, map[string]any{"symbols_with_bars": bars, "profiles": profiles, "actions_checked": checked, "data_issues": issues, "first_date": first, "last_date": last}, nil)
+	})
 	m.HandleFunc("GET /v1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		v, err := s.Store.Jobs(r.Context())
 		if err != nil {
@@ -146,37 +163,9 @@ func (s *Service) Handler() http.Handler {
 		}
 		reply(w, 202, v, nil)
 	})
-	m.HandleFunc("GET /v1/strategies", func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.Store.Strategies(r.Context())
-		if err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, v, nil)
-	})
-	m.HandleFunc("PUT /v1/strategies/{id}", func(w http.ResponseWriter, r *http.Request) {
-		var v Strategy
-		if err := decode(w, r, &v); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		if v.ID != "" && v.ID != r.PathValue("id") {
-			reply(w, 400, nil, fmt.Errorf("strategy ID mismatch"))
-			return
-		}
-		v.ID = r.PathValue("id")
-		if err := s.Store.SaveStrategy(r.Context(), v); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		reply(w, 200, v, nil)
-	})
 	m.HandleFunc("GET /v1/bars", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		symbol := q.Get("symbol")
-		end := q.Get("end")
-		start := q.Get("start")
-		mode := q.Get("adjust")
+		symbol, end, start, mode := q.Get("symbol"), q.Get("end"), q.Get("start"), q.Get("adjust")
 		if mode == "" {
 			mode = "none"
 		}
@@ -212,214 +201,44 @@ func (s *Service) Handler() http.Handler {
 		}
 		reply(w, 200, map[string]any{"dataset_version": d.Version, "adjust": mode, "adjust_as_of": end, "bars": out}, nil)
 	})
-	m.HandleFunc("POST /v1/screens", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			StrategyID string   `json:"strategy_id"`
-			Date       string   `json:"date"`
-			Symbols    []string `json:"symbols"`
+	m.HandleFunc("GET /v1/history/bars", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		end := q.Get("end")
+		if end == "" {
+			end = ClosedThrough(timeNow())
 		}
-		if err := decode(w, r, &req); err != nil {
-			reply(w, 400, nil, err)
-			return
+		adjust := q.Get("adjust")
+		if adjust == "" {
+			adjust = "none"
 		}
-		strategy, err := s.Store.Strategy(r.Context(), req.StrategyID)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		d, err := s.Store.SnapshotWindow(r.Context(), req.Symbols, req.Date, strategy.Warmup())
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		v, err := Screen(d, strategy, req.Date)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		id := uuid.NewString()
-		if err = s.Store.Artifact(r.Context(), id, "screen", v); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
-	})
-	m.HandleFunc("POST /v1/mtfa/screens", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Date    string      `json:"date"`
-			Symbols []string    `json:"symbols"`
-			Config  *MTFAConfig `json:"config"`
-		}
-		if err := decode(w, r, &req); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		cfg := mergeMTFAConfig(req.Config)
-		d, err := s.Store.SnapshotWindow(r.Context(), req.Symbols, req.Date, 260)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		v, err := ScanMTFA(d, req.Date, cfg)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		id := uuid.NewString()
-		if err = s.Store.Artifact(r.Context(), id, "mtfa-screen", v); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
-	})
-	m.HandleFunc("GET /v1/mtfa/latest", func(w http.ResponseWriter, r *http.Request) {
-		var raw string
-		err := s.Store.db.QueryRowContext(r.Context(), "SELECT body FROM artifacts WHERE kind IN ('mtfa-screen','daily-bundle') ORDER BY created_at DESC LIMIT 1").Scan(&raw)
-		if err != nil {
-			code := 500
-			if errors.Is(err, sql.ErrNoRows) {
-				code = 404
+		limit := 200
+		if q.Has("limit") {
+			parsed, err := strconv.Atoi(q.Get("limit"))
+			if err != nil {
+				reply(w, 400, nil, fmt.Errorf("invalid limit"))
+				return
 			}
-			reply(w, code, nil, err)
-			return
+			limit = parsed
 		}
-		reply(w, 200, json.RawMessage(raw), nil)
-	})
-	m.HandleFunc("POST /v1/mtfa/execution", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Plan  MTFAPlan       `json:"plan"`
-			Input ExecutionInput `json:"input"`
-		}
-		if err := decode(w, r, &req); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		reply(w, 200, DecideExecution(req.Plan, req.Input), nil)
-	})
-	m.HandleFunc("POST /v1/mtfa/backtests", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Symbols []string         `json:"symbols"`
-			Config  *PortfolioConfig `json:"config"`
-		}
-		if err := decode(w, r, &req); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		cfg := mergePortfolioConfig(req.Config)
-		d, err := s.Store.Snapshot(r.Context(), req.Symbols, cfg.End)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		v, err := BacktestMTFAPortfolio(d, cfg)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		id := uuid.NewString()
-		if err = s.Store.Artifact(r.Context(), id, "mtfa-portfolio-backtest", v); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
-	})
-	m.HandleFunc("GET /v1/data-coverage", func(w http.ResponseWriter, r *http.Request) {
-		var bars, profiles, checked, issues int64
-		var first, last string
-		err := s.Store.db.QueryRowContext(r.Context(), "SELECT count(DISTINCT symbol),COALESCE(CAST(min(date) AS VARCHAR),''),COALESCE(CAST(max(date) AS VARCHAR),'') FROM bars_daily").Scan(&bars, &first, &last)
-		if err == nil {
-			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM instrument_profiles").Scan(&profiles)
-		}
-		if err == nil {
-			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM instruments WHERE actions_checked").Scan(&checked)
-		}
-		if err == nil {
-			err = s.Store.db.QueryRowContext(r.Context(), "SELECT count(*) FROM data_issues").Scan(&issues)
-		}
-		if err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, map[string]any{"symbols_with_bars": bars, "profiles": profiles, "actions_checked": checked, "data_issues": issues, "first_date": first, "last_date": last, "gaps": []string{"historical ST status", "historical industry membership", "historical float shares/market cap", "official exchange calendar", "historical intraday snapshots", "shareholder-count announcement history"}}, nil)
-	})
-	m.HandleFunc("POST /v1/backtests", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			StrategyID string         `json:"strategy_id"`
-			Config     BacktestConfig `json:"config"`
-		}
-		if err := decode(w, r, &req); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		strategy, err := s.Store.Strategy(r.Context(), req.StrategyID)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		d, err := s.Store.Snapshot(r.Context(), []string{req.Config.Symbol}, req.Config.End)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		v, err := Backtest(d, strategy, req.Config)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		id := uuid.NewString()
-		snapshot := id + "-dataset"
-		if err = s.Store.Artifact(r.Context(), snapshot, "dataset", d); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		result := map[string]any{"id": id, "dataset_id": snapshot, "result": v}
-		if err = s.Store.Artifact(r.Context(), id, "backtest", result); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, result, nil)
-	})
-	m.HandleFunc("POST /v1/reviews", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Date string `json:"date"`
-		}
-		if err := decode(w, r, &req); err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		d, err := s.Store.SnapshotWindow(r.Context(), nil, req.Date, 501)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		strategies, err := s.Store.Strategies(r.Context())
-		if err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		v, err := Review(d, req.Date, strategies)
-		if err != nil {
-			reply(w, 400, nil, err)
-			return
-		}
-		id := uuid.NewString()
-		if err = s.Store.Artifact(r.Context(), id, "review", v); err != nil {
-			reply(w, 500, nil, err)
-			return
-		}
-		reply(w, 200, map[string]any{"id": id, "result": v}, nil)
-	})
-	m.HandleFunc("GET /v1/artifacts/{id}", func(w http.ResponseWriter, r *http.Request) {
-		v, err := s.Store.GetArtifact(r.Context(), r.PathValue("id"))
-		if err != nil {
-			code := 500
-			if errors.Is(err, sql.ErrNoRows) {
-				code = 404
+		var version *int64
+		if q.Has("version") {
+			parsed, err := strconv.ParseInt(q.Get("version"), 10, 64)
+			if err != nil || parsed < 0 {
+				reply(w, 400, nil, fmt.Errorf("invalid version"))
+				return
 			}
-			reply(w, code, nil, err)
+			version = &parsed
+		}
+		page, err := s.Store.QueryBarsPage(r.Context(), q.Get("symbol"), q.Get("start"), end, q.Get("before"), adjust, limit, version)
+		if err != nil {
+			status := 400
+			if errors.Is(err, ErrHistoryVersionChanged) || errors.Is(err, ErrHistoryActionsUnchecked) {
+				status = 409
+			}
+			reply(w, status, nil, err)
 			return
 		}
-		reply(w, 200, v, nil)
+		reply(w, 200, page, nil)
 	})
 	m.HandleFunc("GET /v1/dataset", func(w http.ResponseWriter, r *http.Request) {
 		symbol := r.URL.Query().Get("symbol")

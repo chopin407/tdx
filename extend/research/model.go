@@ -1,4 +1,4 @@
-// Package research provides the local daily-data research workflow. Prices in
+// Package research provides local daily-data storage and retrieval. Prices in
 // storage are integer milli-yuan; API prices are yuan, stock volume is shares.
 package research
 
@@ -14,7 +14,6 @@ import (
 
 var Shanghai = time.FixedZone("Asia/Shanghai", 8*3600)
 var symbolRE = regexp.MustCompile(`^(sh|sz|bj)[0-9]{6}$`)
-var idRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // Bar is a completed, unadjusted daily observation. Index volume is lots.
 type Bar struct {
@@ -75,8 +74,7 @@ type Dataset struct {
 	Profiles       map[string]InstrumentProfile `json:"profiles"`
 }
 
-// InstrumentProfile is current reference data. Historical simulations must
-// explicitly report that current names/industry/float shares are not point-in-time.
+// InstrumentProfile is current reference data, not a historical point-in-time record.
 type InstrumentProfile struct {
 	Symbol      string  `json:"symbol"`
 	Name        string  `json:"name"`

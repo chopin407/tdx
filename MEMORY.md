@@ -15,6 +15,9 @@
 
 ## 架构
 
+- 2026-09-28：tdx 收敛为数据服务；`cmd/tdx-research` 名称及 DuckDB 路径保持兼容，但 `extend/research` 只保留离线/在线入库、覆盖率、公司行为、历史 K 线及数据任务。`daily` 仅更新数据；不再生成复盘产物，也不提供策略、MTF-A、执行校验或回测路由。旧库策略/产物表保留原数据，不自动删除，新库不再创建。dashboard 独立承担交易策略。
+- 2026-09-28：新增 `GET /v1/history/bars`：单证券 DuckDB 日线按最新页读取，返回时间升序 K 线、`next_before` 与 `dataset_version`；后续页传版本，更新冲突返回 409。原始数据 SQL 限量查询，复权数据以固定 `end` 为锚点，先读取完整单证券历史再分页；dashboard 只做令牌保护的后端代理。
+
 - 2026-09-24：通用策略新增 `weekly_cup_handle`（`extend/research/weekly_cup_handle.go`），沿用日线前复权数据在信号日聚合已完成周线；只接受周五完成周，在 8–24 周勺底和 1–3 周缩量整理窗口内寻找放量突破后的反包，记录实际周数和量价证据。`Warmup=160` 日线，默认策略仅在 ID 缺失时写入，不覆盖现有用户策略；此研究信号不等于 MTF-A 交易许可。节假日短周与历史 ST/规模字段仍是已知数据缺口。
 - 2026-09-24：通用策略新增 `weekly_double_bottom`（`extend/research/weekly_double_bottom.go`），复用已完成周线聚合，辨认两个相隔 3–10 周的局部低点、有效颈线、第二底承接与首次放量破颈线；信号证据列出低点日期/价格、颈线和量比。默认 ID 仅缺失时写入，不覆盖用户策略；与 MTF-A 交易许可独立。
 - 2026-09-24：通用策略新增 `weekly_platform_hold`（`extend/research/weekly_platform_hold.go`），识别 6–20 周多次底部回踩的平台、放量突破和后续 1–3 周缩量守住平台上沿。信号是观察状态，非立即买入或 MTF-A 交易许可；默认 ID 仅缺失时写入。

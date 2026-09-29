@@ -28,8 +28,6 @@ CREATE TABLE IF NOT EXISTS instruments (symbol VARCHAR PRIMARY KEY, kind VARCHAR
 CREATE TABLE IF NOT EXISTS instrument_profiles (symbol VARCHAR PRIMARY KEY, name VARCHAR NOT NULL DEFAULT '', industry VARCHAR NOT NULL DEFAULT '', ipo_date VARCHAR NOT NULL DEFAULT '', is_st BOOLEAN NOT NULL DEFAULT false, float_shares DOUBLE NOT NULL DEFAULT 0, total_shares DOUBLE NOT NULL DEFAULT 0, finance_date VARCHAR NOT NULL DEFAULT '', source VARCHAR NOT NULL DEFAULT '', point_in_time BOOLEAN NOT NULL DEFAULT false, updated_at VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS bars_daily (symbol VARCHAR NOT NULL, date DATE NOT NULL, open BIGINT NOT NULL, high BIGINT NOT NULL, low BIGINT NOT NULL, close BIGINT NOT NULL, volume BIGINT NOT NULL, amount DOUBLE NOT NULL, source VARCHAR NOT NULL, PRIMARY KEY(symbol,date));
 CREATE TABLE IF NOT EXISTS corporate_actions (symbol VARCHAR NOT NULL, date DATE NOT NULL, category INTEGER NOT NULL, c1 DOUBLE, c2 DOUBLE, c3 DOUBLE, c4 DOUBLE, PRIMARY KEY(symbol,date,category));
-CREATE TABLE IF NOT EXISTS strategies (id VARCHAR PRIMARY KEY, body VARCHAR NOT NULL);
-CREATE TABLE IF NOT EXISTS artifacts (id VARCHAR PRIMARY KEY, kind VARCHAR NOT NULL, created_at VARCHAR NOT NULL, body VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS jobs (id VARCHAR PRIMARY KEY, body VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS data_issues (symbol VARCHAR, date_text VARCHAR, row_no INTEGER, file_hash VARCHAR, reason VARCHAR, raw_hex VARCHAR, PRIMARY KEY(symbol,file_hash,row_no));
 `
@@ -201,7 +199,7 @@ func (s *Store) Snapshot(ctx context.Context, symbols []string, end string) (*Da
 }
 
 // SnapshotWindow bounds cross-sectional scans to the latest n bars per symbol.
-// Zero requests full history, used for individual backtests and exports.
+// Zero requests full history for data export.
 func (s *Store) SnapshotWindow(ctx context.Context, symbols []string, end string, n int) (*Dataset, error) {
 	if _, err := parseDate(end); err != nil {
 		return nil, err
@@ -306,61 +304,6 @@ func (s *Store) SnapshotWindow(ctx context.Context, symbols []string, end string
 	return d, profileRows.Err()
 }
 
-func (s *Store) SaveStrategy(ctx context.Context, v Strategy) error {
-	if err := v.Validate(); err != nil {
-		return err
-	}
-	b, _ := json.Marshal(v)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err := s.db.ExecContext(ctx, "INSERT INTO strategies VALUES (?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body", v.ID, string(b))
-	return err
-}
-func (s *Store) Strategy(ctx context.Context, id string) (Strategy, error) {
-	var raw string
-	v := Strategy{}
-	err := s.db.QueryRowContext(ctx, "SELECT body FROM strategies WHERE id=?", id).Scan(&raw)
-	if err != nil {
-		return v, err
-	}
-	err = json.Unmarshal([]byte(raw), &v)
-	return v, err
-}
-func (s *Store) Strategies(ctx context.Context) ([]Strategy, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT body FROM strategies ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Strategy{}
-	for rows.Next() {
-		var raw string
-		var v Strategy
-		if err = rows.Scan(&raw); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal([]byte(raw), &v); err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
-}
-func (s *Store) Artifact(ctx context.Context, id, kind string, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, err = s.db.ExecContext(ctx, "INSERT INTO artifacts VALUES (?,?,?,?)", id, kind, time.Now().UTC().Format(time.RFC3339), string(b))
-	return err
-}
-func (s *Store) GetArtifact(ctx context.Context, id string) (json.RawMessage, error) {
-	var b string
-	err := s.db.QueryRowContext(ctx, "SELECT body FROM artifacts WHERE id=?", id).Scan(&b)
-	return json.RawMessage(b), err
-}
 func (s *Store) SaveJob(ctx context.Context, j Job) error {
 	b, err := json.Marshal(j)
 	if err != nil {

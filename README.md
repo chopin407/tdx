@@ -1,11 +1,13 @@
 # 📈 通达信协议解析
 
-## 个人研究闭环（新增）
+## 历史数据服务
 
-新增 `cmd/tdx-research`：DuckDB 历史日线入库、在线增量更新、MTF-A 周/月筛选、形态评分、次日执行状态机、组合回测和盘后复盘；与原有行情 HTTP 接口共用路由。离线目录通过 `TDX_VIPDOC_DIR` 或 `-import-dir` 配置，详见 [研究服务使用说明](docs/research.md)。原有入口保持不变。
+`cmd/tdx-research` 现仅负责 DuckDB 历史日线入库、在线增量更新、覆盖率与历史 K 线查询；与原有实时行情 HTTP 接口共用路由。策略、选股、执行校验和回测不再由 tdx 提供。离线目录通过 `TDX_VIPDOC_DIR` 或 `-import-dir` 配置，详见 [数据服务使用说明](docs/research.md)。原有入口保持不变。
+
+本地 DuckDB 历史日线分页查询使用 `GET /v1/history/bars`，支持日期范围、前/后复权与数据版本校验；原有 `/v1/bars` 保持兼容。
 
 Debian 可使用 systemd，或通过 `deploy/tdx-research-pm2.sh` 管理 `pm2.config.js` 中独立的 `tdx-research` 进程；两种方式不要同时启用。
-首次初始化可按 `down → import → update → daily` 执行：`down` 下载并解压通达信官方沪深京完整日线包。
+首次初始化可按 `down → import → update → daily` 执行：`down` 下载并解压通达信官方沪深京完整日线包；`daily` 仅更新数据。
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org)  
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
