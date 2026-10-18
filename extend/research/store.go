@@ -67,6 +67,9 @@ func Open(path string) (*Store, error) {
 			j.State = "interrupted"
 			j.Error = "service stopped before job completion; rerun is safe"
 			j.Finished = time.Now().UTC().Format(time.RFC3339)
+			j.Updated = j.Finished
+			j.RetrySymbols = append(j.RetrySymbols, j.RemainingSymbols...)
+			j.RemainingSymbols = nil
 			if err = s.SaveJob(context.Background(), j); err != nil {
 				db.Close()
 				return nil, err

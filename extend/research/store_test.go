@@ -329,7 +329,7 @@ func TestReopenMarksInterruptedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.SaveJob(context.Background(), Job{ID: "unfinished", State: "running", Started: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+	if err = s.SaveJob(context.Background(), Job{ID: "unfinished", State: "running", Started: time.Now().UTC().Format(time.RFC3339), Total: 3, Processed: 1, RetrySymbols: []string{"sz000001"}, RemainingSymbols: []string{"sz000002", "sz000003"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -343,5 +343,8 @@ func TestReopenMarksInterruptedJob(t *testing.T) {
 	jobs, err := s.Jobs(context.Background())
 	if err != nil || len(jobs) != 1 || jobs[0].State != "interrupted" {
 		t.Fatal(jobs, err)
+	}
+	if len(jobs[0].RetrySymbols) != 3 || len(jobs[0].RemainingSymbols) != 0 || jobs[0].Updated == "" {
+		t.Fatal("restart lost outstanding symbols", jobs[0])
 	}
 }

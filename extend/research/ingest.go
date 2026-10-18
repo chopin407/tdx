@@ -358,10 +358,19 @@ func (s *Store) ImportDirectory(ctx context.Context, dir string, scale int, cuto
 
 // Update performs a per-symbol overlap refresh. No global max-date watermark.
 func (s *Store) Update(ctx context.Context, source Source, symbols []string, cutoff string, progress func(string, int, error)) error {
+	var err error
+	symbols, err = updateSymbols(ctx, source, symbols)
+	if err != nil {
+		return err
+	}
+	return s.updateSymbols(ctx, source, symbols, cutoff, progress)
+}
+
+func updateSymbols(ctx context.Context, source Source, symbols []string) ([]string, error) {
 	if len(symbols) == 0 {
 		online, err := source.Symbols(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		set := map[string]bool{}
 		for _, v := range online {
@@ -375,8 +384,12 @@ func (s *Store) Update(ctx context.Context, source Source, symbols []string, cut
 		sort.Strings(symbols)
 	}
 	if len(symbols) == 0 {
-		return fmt.Errorf("no symbols to update")
+		return nil, fmt.Errorf("no symbols to update")
 	}
+	return symbols, nil
+}
+
+func (s *Store) updateSymbols(ctx context.Context, source Source, symbols []string, cutoff string, progress func(string, int, error)) error {
 	failures := 0
 	consecutiveFailures := 0
 	for _, symbol := range symbols {
