@@ -13,7 +13,7 @@ CGO_ENABLED=1 go build -trimpath -o output/bin/tdx-research ./cmd/tdx-research
 go build -trimpath -o output/bin/tdx-down ./cmd/tdx-down
 export TDX_VIPDOC_DIR=/data/tdx/vipdoc
 export TDX_API_TOKEN='<从安全环境文件读取的令牌>'
-./output/bin/tdx-research -addr :8081 -db output/research/market.duckdb -schedule 19:00
+./output/bin/tdx-research -addr :8081 -db output/research/market.duckdb -schedule 17:00
 ```
 
 生产环境可使用 `deploy/tdx-research.service` 或 `deploy/tdx-research-pm2.sh`，二者不可同时打开同一 DuckDB。PM2 默认从 `/etc/tdx-research.env` 读取配置；`TDX_RESEARCH_ENV_FILE` 可覆盖。服务读取 vipdoc 目录、写入 output；不要在导入过程中改写完整包。
@@ -28,7 +28,7 @@ export TDX_API_TOKEN='<从安全环境文件读取的令牌>'
 ./deploy/tdx-research-pm2.sh jobs
 ```
 
-服务同一时间只运行一个写入任务。上海时间 16:30 前不会把当日尚未完成的日线入库；`-schedule 19:00` 默认调度每日更新。离线包不含完整公司行为及当前证券档案，前复权查询前应运行 `update`。
+服务同一时间只运行一个写入任务。上海时间 16:30 前不会把当日尚未完成的日线入库；`-schedule 17:00` 默认调度每日更新，周末跳过，工作日用当日指数日线核验交易日。dashboard默认18:00扫描日池、每周最后实际交易日19:00扫描周池（节假日短周可在周四或周三，整周休市不生成新池），优先读取本服务已落库数据；更新时间不保证任务已完成，数据缺失/落后时应明确降级，不能把旧日线当作当日数据。已有PM2/systemd或自定义命令的显式`-schedule 19:00`须更新并重启研究服务。离线包不含完整公司行为及当前证券档案，前复权查询前应运行 `update`。
 
 ### 每日调度与失败补齐
 

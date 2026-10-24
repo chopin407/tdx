@@ -40,7 +40,7 @@ func run() error {
 	dbPath := flag.String("db", "output/research/market.duckdb", "local DuckDB file")
 	importDir := flag.String("import-dir", defaultImportDir(), "server-side vipdoc directory")
 	scale := flag.Int("price-scale", 0, "offline price divisor: 0 by instrument, or explicit 100/1000")
-	schedule := flag.String("schedule", "19:00", "daily Shanghai HH:MM; empty disables scheduling")
+	schedule := flag.String("schedule", research.DefaultDailySchedule, "daily Shanghai HH:MM; empty disables scheduling")
 	jobTimeout := flag.Duration("job-timeout", 2*time.Hour, "maximum duration of one data job")
 	symbolList := flag.String("symbols", "", "comma-separated update universe; empty discovers current A shares")
 	offline := flag.Bool("offline", false, "disable live APIs and online jobs")

@@ -60,11 +60,14 @@ func TestSessionProbeUsesActualIndexDay(t *testing.T) {
 }
 
 func TestSchedulerSkipsWeekendAndBeforeSchedule(t *testing.T) {
-	s := &Service{Config: Config{Schedule: "19:00"}}
+	if DefaultDailySchedule != "17:00" {
+		t.Fatal("daily update must precede dashboard scans")
+	}
+	s := &Service{Config: Config{Schedule: DefaultDailySchedule}}
 	// Store intentionally nil: neither path may query DB or open a connection.
 	s.scheduleTick(time.Date(2026, 10, 17, 20, 0, 0, 0, Shanghai))
 	s.scheduleTick(time.Date(2026, 10, 18, 20, 0, 0, 0, Shanghai))
-	s.scheduleTick(time.Date(2026, 10, 16, 18, 59, 0, 0, Shanghai))
+	s.scheduleTick(time.Date(2026, 10, 16, 16, 59, 0, 0, Shanghai))
 }
 
 func TestScheduleRetryOnlyOutstandingAndFinishCooldown(t *testing.T) {

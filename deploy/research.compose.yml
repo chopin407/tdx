@@ -12,7 +12,7 @@ services:
     volumes:
       - research-data:/app/output
       - ${TDX_VIPDOC_DIR:?set an absolute Debian vipdoc directory}:/import:ro
-    command: ["-import-dir", "/import", "-schedule", "19:00"]
+    command: ["-import-dir", "/import", "-schedule", "17:00"]
     stop_grace_period: 2m
 volumes:
   research-data:

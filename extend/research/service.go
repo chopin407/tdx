@@ -14,6 +14,9 @@ import (
 
 var ErrBusy = errors.New("another data job is running")
 
+// DefaultDailySchedule updates completed daily data before dashboard pool scans.
+const DefaultDailySchedule = "17:00"
+
 // Job retains partial progress; failed symbols can be replayed idempotently.
 type Job struct {
 	ID               string            `json:"id"`

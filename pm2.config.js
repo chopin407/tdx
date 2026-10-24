@@ -21,7 +21,8 @@ module.exports = {
       name: "tdx-research",
       script: "./output/bin/tdx-research",
       cwd: root,
-      args: ["-addr", ":8081", "-db", "output/research/market.duckdb", "-schedule", "19:00"],
+      // 交易日17:00更新落库；dashboard日池18:00、每周最后交易日周池19:00读取。
+      args: ["-addr", ":8081", "-db", "output/research/market.duckdb", "-schedule", "17:00"],
       instances: 1,
       exec_mode: "fork",
       interpreter: "none",
